@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 import { Options as ChromeOptions } from 'selenium-webdriver/chrome.js';
 import { Options as EdgeOptions } from 'selenium-webdriver/edge.js';
 import { Options as FirefoxOptions } from 'selenium-webdriver/firefox.js';
-import { Options as IeOptions } from 'selenium-webdriver/ie.js';
+import { Options as IeOptions, ServiceBuilder as IeServiceBuilder } from 'selenium-webdriver/ie.js';
 import { Options as SafariOptions } from 'selenium-webdriver/safari.js';
 
 const require = createRequire(import.meta.url);
@@ -334,6 +334,12 @@ const cleanUpSessions = async (sessions) => {
     );
 };
 
+const addBrowserArguments = (webdriverOptions, browserArguments) => {
+    browserArguments?.forEach((argument) => {
+        webdriverOptions.addArguments(argument);
+    });
+};
+
 const launchBrowser = async (browser, options = {}) => {
     validateBrowserArguments(options.arguments);
 
@@ -352,27 +358,21 @@ const launchBrowser = async (browser, options = {}) => {
         case 'chrome': {
             const chromeOptions = new ChromeOptions();
             if (options.headless) chromeOptions.addArguments('--headless=new');
-            options.arguments?.forEach((argument) => {
-                chromeOptions.addArguments(argument);
-            });
+            addBrowserArguments(chromeOptions, options.arguments);
             driver = await builder.forBrowser('chrome').setChromeOptions(chromeOptions).build();
             break;
         }
         case 'edge': {
             const edgeOptions = new EdgeOptions();
             if (options.headless) edgeOptions.addArguments('--headless=new');
-            options.arguments?.forEach((argument) => {
-                edgeOptions.addArguments(argument);
-            });
-            driver = await builder.forBrowser('edge').setEdgeOptions(edgeOptions).build();
+            addBrowserArguments(edgeOptions, options.arguments);
+            driver = await builder.forBrowser('MicrosoftEdge').setEdgeOptions(edgeOptions).build();
             break;
         }
         case 'firefox': {
             const firefoxOptions = new FirefoxOptions();
             if (options.headless) firefoxOptions.addArguments('--headless');
-            options.arguments?.forEach((argument) => {
-                firefoxOptions.addArguments(argument);
-            });
+            addBrowserArguments(firefoxOptions, options.arguments);
             driver = await builder.forBrowser('firefox').setFirefoxOptions(firefoxOptions).build();
             break;
         }
@@ -399,16 +399,21 @@ const launchBrowser = async (browser, options = {}) => {
                 options.edgePath ||
                     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
             );
-            ieOptions.forceCreateProcessApi(true);
+            if (process.env.MCP_IE_DRIVER_LOG) {
+                builder.setIeService(
+                    new IeServiceBuilder().addArguments(
+                        '--log-level=TRACE',
+                        `--log-file=${process.env.MCP_IE_DRIVER_LOG}`
+                    )
+                );
+            }
             if (options.ieIgnoreZoomSetting) ieOptions.ignoreZoomSetting(true);
             if (options.headless) {
                 warnings.push(
                     'Edge IE mode does not support headless — launching with a visible window.'
                 );
             }
-            options.arguments?.forEach((argument) => {
-                ieOptions.addArguments(argument);
-            });
+            addBrowserArguments(ieOptions, options.arguments);
             driver = await builder.forBrowser('internet explorer').setIeOptions(ieOptions).build();
             break;
         }
@@ -1363,13 +1368,19 @@ server.registerTool(
 
             const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
             const configPath = join(packageRoot, 'src', 'vrt', 'playwright.config.js');
-            const playwrightCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+            const playwrightCli = join(
+                packageRoot,
+                'node_modules',
+                '@playwright',
+                'test',
+                'cli.js'
+            );
             let status = 'passed';
             let runnerOutput = '';
             try {
                 const { stdout, stderr } = await execFileAsync(
-                    playwrightCommand,
-                    ['playwright', 'test', '--config', configPath],
+                    process.execPath,
+                    [playwrightCli, 'test', '--config', configPath],
                     {
                         cwd: packageRoot,
                         env: {
@@ -1386,6 +1397,7 @@ server.registerTool(
             } catch (runnerError) {
                 status = 'different';
                 runnerOutput = `${runnerError.stdout || ''}\n${runnerError.stderr || ''}`.trim();
+                if (!runnerOutput) runnerOutput = runnerError.message;
             }
 
             let diffPath;

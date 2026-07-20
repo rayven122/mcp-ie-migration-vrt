@@ -28,11 +28,15 @@ Selenium + Edge IE mode                Selenium + Chromium Edge
 - Windows 10/11またはWindows Server
 - Node.js 18以上
 - Microsoft Edge Stable
-- IEDriverServer 4.0.0.0以上を`PATH`へ追加
+- IEDriverServer 4.0.0.0以上（Selenium Managerによる自動取得、または`PATH`へ追加）
 - Edge IEモードとEnterprise Mode Site Listの設定
 - 移行前URLが実際にIEモードで開くこと
 
-IEモードはheadless実行できません。RDPで利用する場合は、撮影中に解像度、Windows表示倍率、Edgeズームを変更しないでください。
+IEモードはheadless実行できません。MCPサーバーはログオン中の対話セッションで、Edgeと同じ権限レベル（通常は非昇格）で実行してください。管理者として起動すると、IEDriverがIEモード画面へ接続できない場合があります。RDPで利用する場合は、撮影中に解像度、Windows表示倍率、Edgeズームを変更しないでください。
+
+IEDriverの標準要件として、Internet Optionsの全セキュリティゾーンでProtected Modeを同じ値にし、Edge/IEズームとWindows表示倍率を100%にします。初回起動時にWindows Firewallの確認が表示された場合は、Node.js、IEDriverServer、EdgeDriverのローカルWebDriver通信を許可してください。
+
+指定viewportにブラウザchrome分を足した外側のウィンドウが、RDP/VMの画面解像度へ収まる必要があります。例えば1280×800の検証VMでは1200×650を使用します。収まらない値は画像を縮小せず、capture contractエラーとして返します。
 
 ## インストール
 
@@ -226,6 +230,15 @@ npm run pack:dry-run
 ```
 
 テストにはChromeとChromeDriverが必要です。Edge IEモードの実機確認はWindows環境で行ってください。
+
+Windows/IIS上でASP.NET 4.xのVB.NET Web Formsまで確認する場合は、`test/fixtures/aspnet-vb4`を隔離したIISサイトへ配置し、対話セッションから次を実行します。
+
+```powershell
+$env:VRT_SMOKE_URL = 'http://localhost:8088/Default.aspx'
+node scripts/windows-vrt-smoke.mjs
+```
+
+このsmoke testは、IE11 document modeとChromium Edgeの判別、VB.NET postback操作、同一状態のVRT合格、意図的なCSS差分の検出までを確認します。
 
 ## 環境変数
 

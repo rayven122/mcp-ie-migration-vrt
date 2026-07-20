@@ -29,6 +29,6 @@ Read [capture-contract.md](references/capture-contract.md) before changing viewp
 
 ## Failure handling
 
-- If `start_vrt_browsers` fails, confirm Windows, IEDriverServer, Edge IE mode policy, and the Enterprise Mode Site List.
+- If `start_vrt_browsers` fails, confirm Windows, IEDriverServer, Edge IE mode policy, the Enterprise Mode Site List, matching Protected Mode zone settings, and that the MCP server runs non-elevated in the logged-on interactive session.
 - If capture dimensions differ, restore the configured viewport and browser zoom before retrying.
 - If differences are limited to font antialiasing, adjust the threshold only after confirming there is no layout or typography regression.

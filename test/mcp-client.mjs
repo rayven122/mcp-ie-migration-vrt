@@ -18,9 +18,11 @@ export class McpClient {
     #requestId = 0;
     #pending = new Map();
     #env;
+    #requestTimeoutMs;
 
-    constructor(env = {}) {
+    constructor(env = {}, requestTimeoutMs = 30000) {
         this.#env = env;
+        this.#requestTimeoutMs = requestTimeoutMs;
     }
 
     /**
@@ -165,7 +167,7 @@ export class McpClient {
                         .reject(new Error(`Timeout waiting for response to ${method} (id: ${id})`));
                     this.#pending.delete(id);
                 }
-            }, 30000);
+            }, this.#requestTimeoutMs);
             this.#pending.set(id, { resolve, reject, timer });
             this.#process.stdin.write(`${msg}\n`);
         });
