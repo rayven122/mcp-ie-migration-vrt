@@ -1,0 +1,4 @@
+interface:
+  display_name: "IE Migration VRT"
+  short_description: "IE版とEdge版の画面を比較し差分修正を反復します"
+  default_prompt: "Use $ie-migration-vrt to compare the legacy Edge IE mode page with the migrated Chromium Edge page and fix visual differences."

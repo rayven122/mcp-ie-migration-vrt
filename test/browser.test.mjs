@@ -162,7 +162,7 @@ describe('Browser Management', () => {
     });
 
     describe('multi-session', () => {
-        it('should start a second session (replaces current)', async () => {
+        it('should operate two sessions independently by sessionId', async () => {
             // Start first session
             const first = await client.callTool('start_browser', {
                 browser: 'chrome',
@@ -188,22 +188,25 @@ describe('Browser Management', () => {
             // Navigate in second session to a different page
             await client.callTool('navigate', { url: fixture('interactions.html') });
 
-            // Close second session
-            const closeResult = await client.callTool('close_session');
+            // Close the current (second) session explicitly.
+            const closeResult = await client.callTool('close_session', { sessionId: secondId });
             const closeText = getResponseText(closeResult);
             assert.ok(
                 closeText.includes(secondId),
                 `Expected second session ID in close message, got: ${closeText}`
             );
 
-            // First session's driver is still in the map but not current —
-            // tools should error since currentSession is now null
-            const result = await client.callTool('navigate', { url: fixture('locators.html') });
+            // The first session remains independently addressable.
+            const result = await client.callTool('navigate', {
+                sessionId: firstId,
+                url: fixture('locators.html'),
+            });
             const text = getResponseText(result);
             assert.ok(
-                text.includes('Error') || text.includes('No active'),
-                `Expected no active session error after closing, got: ${text}`
+                text.includes('Navigated'),
+                `Expected first session to remain usable, got: ${text}`
             );
+            await client.callTool('close_session', { sessionId: firstId });
         });
     });
 });

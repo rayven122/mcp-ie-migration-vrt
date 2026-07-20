@@ -1,237 +1,239 @@
-# MCP Selenium Server
+# MCP IE Migration VRT
 
-[![npm version](https://img.shields.io/npm/v/@rayven122/mcp-selenium)](https://www.npmjs.com/package/@rayven122/mcp-selenium)
-[![npm downloads](https://img.shields.io/npm/dm/@rayven122/mcp-selenium)](https://www.npmjs.com/package/@rayven122/mcp-selenium)
-[![License](https://img.shields.io/github/license/rayven122/mcp-selenium)](LICENSE)
+Edge IEモードで表示した移行前画面と、Chromium Edgeで表示した移行後画面を、2つの独立したSeleniumセッションで操作・撮影し、Playwright Testで画像比較するMCPサーバーです。
 
-A Model Context Protocol (MCP) server for browser automation with Selenium
-WebDriver. It lets MCP clients and AI agents drive real local browsers without
-writing a separate Selenium script.
+`rayven122/mcp-selenium`を基盤に、全ブラウザToolの複数セッション対応とIE移行VRTを追加しています。
 
-Use it to open a browser, navigate pages, click elements, fill forms, upload
-files, handle alerts, manage cookies, capture diagnostics, take screenshots, and
-inspect page structure through MCP.
+## 仕組み
 
-## Highlights
-
-- Published on npm as
-  [`@rayven122/mcp-selenium`](https://www.npmjs.com/package/@rayven122/mcp-selenium).
-- Works with Chrome, Firefox, Edge, Safari, and Edge in IE mode.
-- Provides 18 MCP tools for browser automation and 2 MCP resources for browser
-  status and accessibility snapshots.
-- Captures console logs, JavaScript errors, and network activity through
-  WebDriver BiDi when supported by the browser and driver.
-
-## How It Works
-
-```mermaid
-flowchart LR
-    Agent["AI agent or MCP client"] --> MCP["mcp-selenium server"]
-    MCP --> Selenium["Selenium WebDriver"]
-    Selenium --> Browser["Local browser"]
-    Browser --> Page["Target website"]
-    MCP --> Resources["MCP resources<br/>browser status<br/>accessibility snapshot"]
+```text
+beforeSessionId                         afterSessionId
+Selenium + Edge IE mode                Selenium + Chromium Edge
+        │                                      │
+        └──────── page viewport PNG ───────────┘
+                               │
+                         Playwright Test
+                               │
+                    pass / diff PNG / report
 ```
 
-## Setup
+- ブラウザ操作と撮影: Selenium WebDriver
+- IEレンダリング: IEDriverServer + Edge IEモード
+- Chromiumレンダリング: EdgeDriver + Microsoft Edge
+- VRT比較: Playwright Test `toMatchSnapshot`
+- ブラウザのタブ、アドレスバー、タイトルバーは撮影対象外
 
-Choose the setup command for your MCP client. All examples run the published npm
-package with `npx`, so you do not need to clone this repository just to use the
-server.
+## 必要環境
 
-<details open>
-<summary><strong>Goose (Desktop)</strong></summary>
+- Windows 10/11またはWindows Server
+- Node.js 18以上
+- Microsoft Edge Stable
+- IEDriverServer 4.0.0.0以上を`PATH`へ追加
+- Edge IEモードとEnterprise Mode Site Listの設定
+- 移行前URLが実際にIEモードで開くこと
 
-Paste into your browser address bar:
+IEモードはheadless実行できません。RDPで利用する場合は、撮影中に解像度、Windows表示倍率、Edgeズームを変更しないでください。
 
-```
-goose://extension?cmd=npx&arg=-y&arg=%40rayven122%2Fmcp-selenium&id=selenium-mcp&name=Selenium%20MCP&description=automates%20browser%20interactions
-```
-</details>
+## インストール
 
-<details>
-<summary><strong>Goose (CLI)</strong></summary>
+### ローカルクローン
 
-```bash
-goose session --with-extension "npx -y @rayven122/mcp-selenium"
-```
-</details>
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-claude mcp add selenium -- npx -y @rayven122/mcp-selenium
-```
-</details>
-
-<details>
-<summary><strong>Cursor / Windsurf / other MCP clients</strong></summary>
-
-```json
-{
-  "mcpServers": {
-    "selenium": {
-      "command": "npx",
-      "args": ["-y", "@rayven122/mcp-selenium"]
-    }
-  }
-}
-```
-</details>
-
-## Requirements
-
-- Node.js 18 or newer and npm.
-- At least one supported browser installed.
-- The matching browser driver available to Selenium if your environment does
-  not provide one automatically.
-
-## Example Prompts
-
-After adding the server to your MCP client, ask your AI agent something like:
-
-> Open Chrome, go to example.com, and take a screenshot.
-
-> Open Firefox, navigate to this signup page, fill the form, and submit it.
-
-> Inspect the current page and summarize the interactive elements.
-
-The agent can then call `start_browser`, `navigate`, and `take_screenshot`
-through MCP. For most page inspection tasks, agents should prefer the
-`accessibility://current` resource because it is smaller and easier to reason
-about than full HTML or screenshots.
-
-## Supported Browsers
-
-| Browser | `start_browser` value | Headless support | Notes |
-|---------|------------------------|------------------|-------|
-| Chrome | `chrome` | Yes | Uses `--headless=new` when `options.headless` is true. |
-| Firefox | `firefox` | Yes | Uses Firefox headless mode when requested. |
-| Edge | `edge` | Yes | Uses `--headless=new` when `options.headless` is true. |
-| Safari | `safari` | No | macOS only. Requires Safari remote automation. |
-| Edge in IE mode | `edge-ie` | No | Windows only. Only exposed in the `start_browser` schema on Windows. Requires IEDriverServer and IE mode setup. |
-
-<details>
-<summary><strong>Safari setup</strong></summary>
-
-Run this once on macOS:
-
-```bash
-sudo safaridriver --enable
-```
-
-Then enable "Allow Remote Automation" in Safari under Settings > Developer.
-
-</details>
-
-<details>
-<summary><strong>Edge IE mode setup</strong></summary>
-
-Edge IE mode is for legacy sites that must run through the Internet Explorer
-engine inside Microsoft Edge. It requires:
-
-- Windows.
-- Microsoft Edge.
-- IEDriverServer, preferably 32-bit, from the
-  [Selenium downloads](https://www.selenium.dev/downloads/) on your `PATH`.
-- IE mode enabled in Edge by policy or registry, with target sites configured
-  for Internet Explorer mode.
-
-Example:
-
-```json
-{
-  "browser": "edge-ie",
-  "options": {
-    "ieIgnoreZoomSetting": true
-  }
-}
-```
-
-Optional Edge IE mode options include `edgePath` and `ieIgnoreZoomSetting`.
-
-</details>
-
-## Tools
-
-Locator-based tools use the same locator strategies:
-
-| Strategy | Description |
-|----------|-------------|
-| `id` | Find by element ID. |
-| `css` | Find by CSS selector. |
-| `xpath` | Find by XPath expression. |
-| `name` | Find by `name` attribute. |
-| `tag` | Find by tag name. |
-| `class` | Find by class name. |
-
-Most locator-based tools accept an optional `timeout` in milliseconds. The
-default is `10000` unless noted otherwise.
-
-| Tool | Purpose | Key parameters |
-|------|---------|----------------|
-| `start_browser` | Launch a browser session. | `browser`, optional `options` |
-| `navigate` | Navigate to a URL. | `url` |
-| `interact` | Click, double-click, right-click, or hover over an element. | `action`, `by`, `value`, optional `timeout` |
-| `send_keys` | Clear an element, then type text into it. | `by`, `value`, `text`, optional `timeout` |
-| `get_element_text` | Read visible text from an element. | `by`, `value`, optional `timeout` |
-| `get_element_attribute` | Read an element attribute. | `by`, `value`, `attribute`, optional `timeout` |
-| `press_key` | Press a keyboard key. | `key` |
-| `upload_file` | Set a file input to an absolute file path. | `by`, `value`, `filePath`, optional `timeout` |
-| `take_screenshot` | Capture the current page. | optional `outputPath` |
-| `close_session` | Close the current browser session. | none |
-| `execute_script` | Run JavaScript in the browser. | `script`, optional `args` |
-| `window` | List, switch, switch to latest, or close windows and tabs. | `action`, optional `handle` |
-| `frame` | Switch to a frame or back to the default page. | `action`, optional `by`, `value`, `index`, `timeout` |
-| `alert` | Accept, dismiss, read, or type into browser dialogs. | `action`, optional `text`, `timeout` |
-| `add_cookie` | Add a cookie for the current page domain. | `name`, `value`, optional cookie fields |
-| `get_cookies` | Return all cookies or one cookie by name. | optional `name` |
-| `delete_cookie` | Delete all cookies or one cookie by name. | optional `name` |
-| `diagnostics` | Read BiDi console logs, JS errors, or network activity. | `type`, optional `clear` |
-
-## Resources
-
-MCP resources provide read-only data that clients can access without calling a
-tool.
-
-| Resource | MIME type | Requires browser | Description |
-|----------|-----------|------------------|-------------|
-| `browser-status://current` | `text/plain` | No | Current active session ID, or `no active session`. |
-| `accessibility://current` | `application/json` | Yes | Compact accessibility tree of interactive elements and text content. |
-
-## Development
-
-```bash
-git clone https://github.com/rayven122/mcp-selenium.git
-cd mcp-selenium
+```powershell
+git clone https://github.com/rayven122/mcp-ie-migration-vrt.git
+cd mcp-ie-migration-vrt
 npm install
 npm test
 ```
 
-Tests use Node's built-in test runner and talk to the real MCP server over
-stdio. They require Chrome and `chromedriver` on your `PATH`.
+Claude Codeへ追加:
 
-Useful local checks:
+```powershell
+claude mcp add ie-migration-vrt -- node C:\absolute\path\mcp-ie-migration-vrt\src\lib\server.js
+```
+
+Claude DesktopなどのMCP設定:
+
+```json
+{
+  "mcpServers": {
+    "ie-migration-vrt": {
+      "command": "node",
+      "args": [
+        "C:\\absolute\\path\\mcp-ie-migration-vrt\\src\\lib\\server.js"
+      ],
+      "env": {
+        "MCP_VRT_ARTIFACT_DIR": "C:\\work\\vrt-artifacts"
+      }
+    }
+  }
+}
+```
+
+## Skillのインストール
+
+Skillは[skills/ie-migration-vrt](skills/ie-migration-vrt)に含まれています。
+
+プロジェクト単位で使用する場合:
+
+```powershell
+Copy-Item -Recurse skills\ie-migration-vrt C:\path\to\target-project\.claude\skills\
+```
+
+Codexで共通利用する場合:
+
+```powershell
+Copy-Item -Recurse skills\ie-migration-vrt $env:USERPROFILE\.agents\skills\
+```
+
+依頼例:
+
+```text
+$ie-migration-vrt を使って、移行前の注文一覧と移行後の注文一覧を同じ検索結果まで操作し、差分を修正してください。
+```
+
+## 基本的な使い方
+
+### 1. 2つのブラウザを同時に起動
+
+`start_vrt_browsers`:
+
+```json
+{
+  "beforeUrl": "https://legacy.example.local/orders",
+  "afterUrl": "https://new.example.local/orders",
+  "width": 1440,
+  "height": 900
+}
+```
+
+返却例:
+
+```json
+{
+  "beforeSessionId": "edge-ie_...",
+  "afterSessionId": "edge_...",
+  "captureContract": {
+    "width": 1440,
+    "height": 900,
+    "mode": "viewport",
+    "browserChrome": false,
+    "allowImageResize": false
+  }
+}
+```
+
+### 2. 各セッションを個別に操作
+
+移行前の検索欄へ入力:
+
+```json
+{
+  "sessionId": "edge-ie_...",
+  "by": "id",
+  "value": "orderNo",
+  "text": "A-1001"
+}
+```
+
+移行後の検索欄へ入力:
+
+```json
+{
+  "sessionId": "edge_...",
+  "by": "css",
+  "value": "[data-testid='order-number']",
+  "text": "A-1001"
+}
+```
+
+`navigate`、`interact`、`send_keys`、`frame`、`window`など、既存の全Selenium Toolで`sessionId`を指定できます。省略した場合は直近に起動したセッションを使用しますが、VRT中は明示指定を推奨します。
+
+### 3. 現在の画面を比較
+
+両画面を同じ業務状態まで操作してから`vrt`を呼び出します。
+
+```json
+{
+  "beforeSessionId": "edge-ie_...",
+  "afterSessionId": "edge_...",
+  "name": "order-search-result",
+  "width": 1440,
+  "height": 900,
+  "maxDiffPixelRatio": 0.005,
+  "threshold": 0.2
+}
+```
+
+成果物:
+
+```text
+artifacts/vrt/order-search-result/<timestamp>/
+├── before.png
+├── after.png
+├── baseline/expected.png
+├── report.json
+└── test-results/
+    └── ...-diff.png
+```
+
+差分修正後はafterセッションを`navigate`または`execute_script`で再読み込みし、同じ`vrt`を再実行します。
+
+## Tool一覧
+
+| Tool | 用途 |
+|---|---|
+| `start_browser` | 単独ブラウザセッションを起動 |
+| `start_vrt_browsers` | Edge IEモードとChromium Edgeを同時起動 |
+| `navigate` | 指定セッションをURLへ移動 |
+| `interact` | click、doubleclick、rightclick、hover |
+| `send_keys` | 入力欄をクリアして文字入力 |
+| `get_element_text` | 要素テキスト取得 |
+| `get_element_attribute` | 属性取得 |
+| `press_key` | キー入力 |
+| `upload_file` | ファイル入力 |
+| `take_screenshot` | 指定セッションを撮影 |
+| `accessibility_snapshot` | 指定セッションの操作可能要素とテキスト構造を取得 |
+| `execute_script` | JavaScript実行、スクロール、computed style確認 |
+| `window` | ウィンドウ・タブ管理 |
+| `frame` | iframe切り替え |
+| `alert` | alert、confirm、prompt操作 |
+| `add_cookie` / `get_cookies` / `delete_cookie` | Cookie管理 |
+| `diagnostics` | console、JavaScript error、networkログ取得 |
+| `vrt` | 2セッションの現在画面をPlaywright Testで比較 |
+| `close_session` | 指定セッションを終了 |
+
+## 撮影規約
+
+`vrt`は比較前に以下を検証します。
+
+- `window.innerWidth`と`window.innerHeight`を指定値へ調整
+- 両画面を`scrollX=0`、`scrollY=0`へ移動
+- Seleniumのpage screenshotでブラウザchromeを除外
+- before/after PNGの縦横ピクセル数が完全一致
+- 指定viewportとPNGサイズが完全一致
+- サイズ不一致時は画像をリサイズせず失敗
+
+IEとChromiumではフォント描画が異なるため、初期値は`maxDiffPixelRatio=0.005`、`threshold=0.2`です。閾値を変更する前にdiff画像を確認してください。
+
+## 開発
 
 ```bash
+npm install
 npm run check
+npm test
 npm run audit
 npm run pack:dry-run
 ```
 
-This package is published to npm as `@rayven122/mcp-selenium`. The Setup
-section above runs the latest published package with
-`npx -y @rayven122/mcp-selenium`.
+テストにはChromeとChromeDriverが必要です。Edge IEモードの実機確認はWindows環境で行ってください。
 
-### Run from a local clone
+## 環境変数
 
-For a pinned local copy (recommended when running on a fixed Windows host for
-Edge IE mode), point your MCP client at the server entry directly:
-
-```bash
-node /absolute/path/to/mcp-selenium/src/lib/server.js
-```
+| 変数 | 説明 |
+|---|---|
+| `MCP_VRT_ARTIFACT_DIR` | VRT成果物の保存先。既定は`./artifacts/vrt` |
+| `MCP_SELENIUM_SCREENSHOT_DIR` | 通常スクリーンショットの保存可能ルート |
+| `MCP_SELENIUM_ALLOW_UNSAFE_BROWSER_ARGS` | 信頼できる環境でのみ、制限されたブラウザ引数を許可 |
 
 ## License
 

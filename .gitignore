@@ -44,5 +44,7 @@ npm-debug.log*
 # Selenium
 geckodriver.log
 chromedriver.log
+artifacts/
+test-vrt-artifacts/
 .goose/
 .beads/

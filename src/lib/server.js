@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -9,6 +13,7 @@ import pkg from 'selenium-webdriver';
 import { z } from 'zod';
 
 const { Builder, By, Key, until, error } = pkg;
+const execFileAsync = promisify(execFile);
 
 // Create an MCP server
 import { createRequire } from 'node:module';
@@ -22,10 +27,10 @@ const require = createRequire(import.meta.url);
 const { version } = require('../../package.json');
 
 const server = new McpServer(
-    { name: 'MCP Selenium', version },
+    { name: 'MCP IE Migration VRT', version },
     {
         instructions:
-            "To understand the current page state, read the accessibility://current resource. It provides a structured accessibility tree that's faster and more reliable for finding element locators.",
+            'For IE migration VRT, call start_vrt_browsers, operate the returned beforeSessionId and afterSessionId with the standard Selenium tools, then call vrt when both pages show the equivalent UI state. Pass sessionId explicitly whenever multiple browsers are open. The VRT tool compares page viewports only; browser tabs, address bars, and window chrome are excluded.',
     }
 );
 
@@ -49,13 +54,25 @@ const state = {
 };
 
 // Helper functions
-const getDriver = () => {
-    const driver = state.drivers.get(state.currentSession);
+const getSessionId = (sessionId) => sessionId || state.currentSession;
+
+const getDriver = (sessionId) => {
+    const resolvedSessionId = getSessionId(sessionId);
+    const driver = state.drivers.get(resolvedSessionId);
     if (!driver) {
-        throw new Error('No active browser session');
+        throw new Error(
+            sessionId
+                ? `Browser session not found: ${sessionId}`
+                : 'No active browser session. Pass sessionId or start a browser first.'
+        );
     }
     return driver;
 };
+
+const sessionIdSchema = z
+    .string()
+    .optional()
+    .describe('Browser session ID. Defaults to the most recently started session.');
 
 const getLocator = (by, value) => {
     switch (by.toLowerCase()) {
@@ -244,11 +261,174 @@ const browserOptionsSchema = z
     .optional();
 
 const locatorSchema = {
+    sessionId: sessionIdSchema,
     by: z
         .enum(['id', 'css', 'xpath', 'name', 'tag', 'class'])
         .describe('Locator strategy to find element'),
     value: z.string().describe('Value for the locator strategy'),
     timeout: z.number().optional().describe('Maximum time to wait for element in milliseconds'),
+};
+
+const pngDimensions = (base64) => {
+    const png = Buffer.from(base64, 'base64');
+    if (png.length < 24 || png.toString('ascii', 1, 4) !== 'PNG') {
+        throw new Error('Screenshot is not a valid PNG');
+    }
+    return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+};
+
+const ensureViewport = async (driver, width, height) => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const viewport = await driver.executeScript(
+            'return { width: window.innerWidth, height: window.innerHeight };'
+        );
+        if (viewport.width === width && viewport.height === height) {
+            await driver.executeScript('window.scrollTo(0, 0);');
+            return viewport;
+        }
+        const rect = await driver.manage().window().getRect();
+        await driver
+            .manage()
+            .window()
+            .setRect({
+                width: rect.width + (width - viewport.width),
+                height: rect.height + (height - viewport.height),
+            });
+    }
+    const viewport = await driver.executeScript(
+        'return { width: window.innerWidth, height: window.innerHeight };'
+    );
+    throw new Error(
+        `Unable to set viewport to ${width}x${height}; actual viewport is ${viewport.width}x${viewport.height}`
+    );
+};
+
+const findDiffImage = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+            const nested = await findDiffImage(path);
+            if (nested) return nested;
+        } else if (entry.name.endsWith('-diff.png')) {
+            return path;
+        }
+    }
+    return undefined;
+};
+
+const safeArtifactName = (name) => {
+    const artifactName = name.trim().replace(/[^a-zA-Z0-9._-]+/g, '-');
+    if (!artifactName || artifactName === '.' || artifactName === '..') {
+        throw new Error('Invalid VRT name');
+    }
+    return artifactName;
+};
+
+const cleanUpSessions = async (sessions) => {
+    await Promise.allSettled(
+        sessions.map(async ({ driver, sessionId }) => {
+            await driver.quit();
+            state.drivers.delete(sessionId);
+            state.bidi.delete(sessionId);
+        })
+    );
+};
+
+const launchBrowser = async (browser, options = {}) => {
+    validateBrowserArguments(options.arguments);
+
+    let builder = new Builder();
+    let driver;
+    const warnings = [];
+
+    if (LogInspector && Network && browser !== 'edge-ie') {
+        builder = builder.withCapabilities({
+            webSocketUrl: true,
+            unhandledPromptBehavior: 'ignore',
+        });
+    }
+
+    switch (browser) {
+        case 'chrome': {
+            const chromeOptions = new ChromeOptions();
+            if (options.headless) chromeOptions.addArguments('--headless=new');
+            options.arguments?.forEach((argument) => {
+                chromeOptions.addArguments(argument);
+            });
+            driver = await builder.forBrowser('chrome').setChromeOptions(chromeOptions).build();
+            break;
+        }
+        case 'edge': {
+            const edgeOptions = new EdgeOptions();
+            if (options.headless) edgeOptions.addArguments('--headless=new');
+            options.arguments?.forEach((argument) => {
+                edgeOptions.addArguments(argument);
+            });
+            driver = await builder.forBrowser('edge').setEdgeOptions(edgeOptions).build();
+            break;
+        }
+        case 'firefox': {
+            const firefoxOptions = new FirefoxOptions();
+            if (options.headless) firefoxOptions.addArguments('--headless');
+            options.arguments?.forEach((argument) => {
+                firefoxOptions.addArguments(argument);
+            });
+            driver = await builder.forBrowser('firefox').setFirefoxOptions(firefoxOptions).build();
+            break;
+        }
+        case 'safari': {
+            const safariOptions = new SafariOptions();
+            if (options.headless) {
+                warnings.push(
+                    'Safari does not support headless mode — launching with visible window.'
+                );
+            }
+            if (options.arguments?.length) {
+                warnings.push('Safari does not support custom arguments — ignoring.');
+            }
+            driver = await builder.forBrowser('safari').setSafariOptions(safariOptions).build();
+            break;
+        }
+        case 'edge-ie': {
+            if (process.platform !== 'win32') {
+                throw new Error('Edge IE mode is only supported on Windows.');
+            }
+            const ieOptions = new IeOptions();
+            ieOptions.setEdgeChromium(true);
+            ieOptions.setEdgePath(
+                options.edgePath ||
+                    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+            );
+            ieOptions.forceCreateProcessApi(true);
+            if (options.ieIgnoreZoomSetting) ieOptions.ignoreZoomSetting(true);
+            if (options.headless) {
+                warnings.push(
+                    'Edge IE mode does not support headless — launching with a visible window.'
+                );
+            }
+            options.arguments?.forEach((argument) => {
+                ieOptions.addArguments(argument);
+            });
+            driver = await builder.forBrowser('internet explorer').setIeOptions(ieOptions).build();
+            break;
+        }
+        default:
+            throw new Error(`Unsupported browser: ${browser}`);
+    }
+
+    const sessionId = `${browser}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    state.drivers.set(sessionId, driver);
+    state.currentSession = sessionId;
+
+    if (LogInspector && Network && browser !== 'edge-ie') {
+        try {
+            await setupBidi(driver, sessionId);
+        } catch (_) {
+            // BiDi is optional and unavailable with some browser/driver combinations.
+        }
+    }
+
+    return { driver, sessionId, warnings, bidi: state.bidi.get(sessionId)?.available === true };
 };
 
 // Browser Management Tools
@@ -267,138 +447,10 @@ server.registerTool(
     },
     async ({ browser, options = {} }) => {
         try {
-            validateBrowserArguments(options.arguments);
-
-            let builder = new Builder();
-            let driver;
-            const warnings = [];
-
-            // Enable BiDi websocket if the modules are available.
-            // IE mode does not support WebDriver BiDi, so skip it for edge-ie.
-            if (LogInspector && Network && browser !== 'edge-ie') {
-                // 'ignore' prevents BiDi from auto-dismissing alert/confirm/prompt dialogs,
-                // allowing the alert tool's accept, dismiss, and get_text actions to work as expected.
-                builder = builder.withCapabilities({
-                    webSocketUrl: true,
-                    unhandledPromptBehavior: 'ignore',
-                });
-            }
-
-            switch (browser) {
-                case 'chrome': {
-                    const chromeOptions = new ChromeOptions();
-                    if (options.headless) {
-                        chromeOptions.addArguments('--headless=new');
-                    }
-                    if (options.arguments) {
-                        options.arguments.forEach((arg) => {
-                            chromeOptions.addArguments(arg);
-                        });
-                    }
-                    driver = await builder
-                        .forBrowser('chrome')
-                        .setChromeOptions(chromeOptions)
-                        .build();
-                    break;
-                }
-                case 'edge': {
-                    const edgeOptions = new EdgeOptions();
-                    if (options.headless) {
-                        edgeOptions.addArguments('--headless=new');
-                    }
-                    if (options.arguments) {
-                        options.arguments.forEach((arg) => {
-                            edgeOptions.addArguments(arg);
-                        });
-                    }
-                    driver = await builder.forBrowser('edge').setEdgeOptions(edgeOptions).build();
-                    break;
-                }
-                case 'firefox': {
-                    const firefoxOptions = new FirefoxOptions();
-                    if (options.headless) {
-                        firefoxOptions.addArguments('--headless');
-                    }
-                    if (options.arguments) {
-                        options.arguments.forEach((arg) => {
-                            firefoxOptions.addArguments(arg);
-                        });
-                    }
-                    driver = await builder
-                        .forBrowser('firefox')
-                        .setFirefoxOptions(firefoxOptions)
-                        .build();
-                    break;
-                }
-                case 'safari': {
-                    const safariOptions = new SafariOptions();
-                    if (options.headless) {
-                        warnings.push(
-                            'Safari does not support headless mode — launching with visible window.'
-                        );
-                    }
-                    if (options.arguments?.length) {
-                        warnings.push('Safari does not support custom arguments — ignoring.');
-                    }
-                    driver = await builder
-                        .forBrowser('safari')
-                        .setSafariOptions(safariOptions)
-                        .build();
-                    break;
-                }
-                case 'edge-ie': {
-                    // Microsoft Edge in Internet Explorer (IE) mode.
-                    // Windows only: driven by IEDriverServer (must be on PATH), which attaches
-                    // to Edge (Chromium) and renders pages with the legacy IE engine.
-                    if (process.platform !== 'win32') {
-                        throw new Error('Edge IE mode is only supported on Windows.');
-                    }
-                    const ieOptions = new IeOptions();
-                    ieOptions.setEdgeChromium(true);
-                    ieOptions.setEdgePath(
-                        options.edgePath ||
-                            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
-                    );
-                    // IE mode needs the CreateProcess API to launch reliably under Edge.
-                    ieOptions.forceCreateProcessApi(true);
-                    if (options.ieIgnoreZoomSetting) {
-                        ieOptions.ignoreZoomSetting(true);
-                    }
-                    if (options.headless) {
-                        warnings.push(
-                            'Edge IE mode does not support headless — launching with a visible window.'
-                        );
-                    }
-                    if (options.arguments?.length) {
-                        options.arguments.forEach((arg) => {
-                            ieOptions.addArguments(arg);
-                        });
-                    }
-                    driver = await builder
-                        .forBrowser('internet explorer')
-                        .setIeOptions(ieOptions)
-                        .build();
-                    break;
-                }
-                default: {
-                    throw new Error(`Unsupported browser: ${browser}`);
-                }
-            }
-            const sessionId = `${browser}_${Date.now()}`;
-            state.drivers.set(sessionId, driver);
-            state.currentSession = sessionId;
-
-            // Attempt to enable BiDi for real-time log capture
-            if (LogInspector && Network) {
-                try {
-                    await setupBidi(driver, sessionId);
-                } catch (_) {
-                    // BiDi not supported by this browser/driver — continue without it
-                }
-            }
+            const { sessionId, warnings, bidi } = await launchBrowser(browser, options);
 
             let message = `Browser started with session_id: ${sessionId}`;
-            if (state.bidi.get(sessionId)?.available) {
+            if (bidi) {
                 message +=
                     ' (BiDi enabled: console logs, JS errors, and network activity are being captured)';
             }
@@ -423,13 +475,14 @@ server.registerTool(
     {
         description: 'navigates to a URL',
         inputSchema: {
+            sessionId: sessionIdSchema,
             url: z.string().describe('URL to navigate to'),
         },
     },
-    async ({ url }) => {
+    async ({ sessionId, url }) => {
         try {
             validateNavigationUrl(url);
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             await driver.get(url);
             return {
                 content: [{ type: 'text', text: `Navigated to ${url}` }],
@@ -455,9 +508,9 @@ server.registerTool(
             ...locatorSchema,
         },
     },
-    async ({ action, by, value, timeout = 10000 }) => {
+    async ({ sessionId, action, by, value, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const locator = getLocator(by, value);
             const element = await driver.wait(until.elementLocated(locator), timeout);
 
@@ -504,9 +557,9 @@ server.registerTool(
             text: z.string().describe('Text to enter into the element'),
         },
     },
-    async ({ by, value, text, timeout = 10000 }) => {
+    async ({ sessionId, by, value, text, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const locator = getLocator(by, value);
             const element = await driver.wait(until.elementLocated(locator), timeout);
             await element.clear();
@@ -531,9 +584,9 @@ server.registerTool(
             ...locatorSchema,
         },
     },
-    async ({ by, value, timeout = 10000 }) => {
+    async ({ sessionId, by, value, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const locator = getLocator(by, value);
             const element = await driver.wait(until.elementLocated(locator), timeout);
             const text = await element.getText();
@@ -554,12 +607,13 @@ server.registerTool(
     {
         description: 'simulates pressing a keyboard key',
         inputSchema: {
+            sessionId: sessionIdSchema,
             key: z.string().describe("Key to press (e.g., 'Enter', 'Tab', 'a', etc.)"),
         },
     },
-    async ({ key }) => {
+    async ({ sessionId, key }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const resolvedKey =
                 key.length === 1 ? key : (Key[key.toUpperCase().replace(/ /g, '_')] ?? null);
             if (resolvedKey === null) {
@@ -596,9 +650,9 @@ server.registerTool(
             filePath: z.string().describe('Absolute path to the file to upload'),
         },
     },
-    async ({ by, value, filePath, timeout = 10000 }) => {
+    async ({ sessionId, by, value, filePath, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const locator = getLocator(by, value);
             const element = await driver.wait(until.elementLocated(locator), timeout);
             await element.sendKeys(filePath);
@@ -620,6 +674,7 @@ server.registerTool(
         description:
             'captures a screenshot of the current page. Prefer using the accessibility://current resource for understanding page content. Use get_element_text, get_element_attribute, or execute_script to verify element state. Only use screenshots when visual layout or styling needs to be verified.',
         inputSchema: {
+            sessionId: sessionIdSchema,
             outputPath: z
                 .string()
                 .optional()
@@ -628,9 +683,9 @@ server.registerTool(
                 ),
         },
     },
-    async ({ outputPath }) => {
+    async ({ sessionId, outputPath }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const screenshot = await driver.takeScreenshot();
             if (outputPath) {
                 const resolvedOutputPath = resolveScreenshotOutputPath(outputPath);
@@ -654,24 +709,49 @@ server.registerTool(
 );
 
 server.registerTool(
+    'accessibility_snapshot',
+    {
+        description:
+            'returns a compact accessibility snapshot for a selected browser session. Use it to inspect both VRT browsers without changing the current session.',
+        inputSchema: { sessionId: sessionIdSchema },
+    },
+    async ({ sessionId }) => {
+        try {
+            const driver = getDriver(sessionId);
+            const tree = (await driver.executeScript(accessibilitySnapshotScript)) || {};
+            return {
+                content: [{ type: 'text', text: JSON.stringify(tree, null, 2) }],
+            };
+        } catch (e) {
+            return {
+                content: [
+                    { type: 'text', text: `Error capturing accessibility snapshot: ${e.message}` },
+                ],
+                isError: true,
+            };
+        }
+    }
+);
+
+server.registerTool(
     'close_session',
     {
         description: 'closes the current browser session',
-        inputSchema: {},
+        inputSchema: { sessionId: sessionIdSchema },
     },
-    async () => {
+    async ({ sessionId }) => {
         try {
-            const driver = getDriver();
-            const sessionId = state.currentSession;
+            const resolvedSessionId = getSessionId(sessionId);
+            const driver = getDriver(resolvedSessionId);
             try {
                 await driver.quit();
             } finally {
-                state.drivers.delete(sessionId);
-                state.bidi.delete(sessionId);
-                state.currentSession = null;
+                state.drivers.delete(resolvedSessionId);
+                state.bidi.delete(resolvedSessionId);
+                if (state.currentSession === resolvedSessionId) state.currentSession = null;
             }
             return {
-                content: [{ type: 'text', text: `Browser session ${sessionId} closed` }],
+                content: [{ type: 'text', text: `Browser session ${resolvedSessionId} closed` }],
             };
         } catch (e) {
             return {
@@ -695,9 +775,9 @@ server.registerTool(
                 .describe("Name of the attribute to get (e.g., 'href', 'value', 'class')"),
         },
     },
-    async ({ by, value, attribute, timeout = 10000 }) => {
+    async ({ sessionId, by, value, attribute, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const locator = getLocator(by, value);
             const element = await driver.wait(until.elementLocated(locator), timeout);
             const attrValue = await element.getAttribute(attribute);
@@ -719,6 +799,7 @@ server.registerTool(
         description:
             'executes JavaScript in the browser and returns the result. Use for advanced interactions not covered by other tools (e.g., drag and drop, scrolling, reading computed styles, manipulating the DOM directly). Also useful for batch-reading multiple element values/states in a single call instead of multiple get_element_attribute calls.',
         inputSchema: {
+            sessionId: sessionIdSchema,
             script: z.string().describe('JavaScript code to execute in the browser'),
             args: z
                 .array(z.any())
@@ -728,9 +809,9 @@ server.registerTool(
                 ),
         },
     },
-    async ({ script, args = [] }) => {
+    async ({ sessionId, script, args = [] }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const result = await driver.executeScript(script, ...args);
             const text =
                 result === undefined || result === null
@@ -756,15 +837,17 @@ server.registerTool(
     {
         description: 'manages browser windows and tabs',
         inputSchema: {
+            sessionId: sessionIdSchema,
             action: z
                 .enum(['list', 'switch', 'switch_latest', 'close'])
                 .describe('Window action to perform'),
             handle: z.string().optional().describe('Window handle (required for switch)'),
         },
     },
-    async ({ action, handle }) => {
+    async ({ sessionId, action, handle }) => {
         try {
-            const driver = getDriver();
+            const resolvedSessionId = getSessionId(sessionId);
+            const driver = getDriver(resolvedSessionId);
             switch (action) {
                 case 'list': {
                     const handles = await driver.getAllWindowHandles();
@@ -808,15 +891,14 @@ server.registerTool(
                             ],
                         };
                     }
-                    const sessionId = state.currentSession;
                     try {
                         await driver.quit();
                     } catch (_) {
                         /* ignore */
                     }
-                    state.drivers.delete(sessionId);
-                    state.bidi.delete(sessionId);
-                    state.currentSession = null;
+                    state.drivers.delete(resolvedSessionId);
+                    state.bidi.delete(resolvedSessionId);
+                    if (state.currentSession === resolvedSessionId) state.currentSession = null;
                     return {
                         content: [{ type: 'text', text: 'Last window closed. Session ended.' }],
                     };
@@ -842,6 +924,7 @@ server.registerTool(
     {
         description: 'switches focus to a frame or back to the main page',
         inputSchema: {
+            sessionId: sessionIdSchema,
             action: z.enum(['switch', 'default']).describe('Frame action to perform'),
             by: z
                 .enum(['id', 'css', 'xpath', 'name', 'tag', 'class'])
@@ -852,9 +935,9 @@ server.registerTool(
             timeout: z.number().optional().describe('Max wait in ms'),
         },
     },
-    async ({ action, by, value, index, timeout = 10000 }) => {
+    async ({ sessionId, action, by, value, index, timeout = 10000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             if (action === 'default') {
                 await driver.switchTo().defaultContent();
                 return { content: [{ type: 'text', text: 'Switched to default content' }] };
@@ -887,6 +970,7 @@ server.registerTool(
     {
         description: 'handles a browser alert, confirm, or prompt dialog',
         inputSchema: {
+            sessionId: sessionIdSchema,
             action: z
                 .enum(['accept', 'dismiss', 'get_text', 'send_text'])
                 .describe('Action to perform on the alert'),
@@ -894,9 +978,9 @@ server.registerTool(
             timeout: z.number().optional().describe('Max wait in ms'),
         },
     },
-    async ({ action, text, timeout = 5000 }) => {
+    async ({ sessionId, action, text, timeout = 5000 }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             await driver.wait(until.alertIsPresent(), timeout);
             const alertObj = await driver.switchTo().alert();
             switch (action) {
@@ -943,6 +1027,7 @@ server.registerTool(
         description:
             "adds a cookie to the current browser session. The browser must be on a page from the cookie's domain before setting it.",
         inputSchema: {
+            sessionId: sessionIdSchema,
             name: z.string().describe('Name of the cookie'),
             value: z.string().describe('Value of the cookie'),
             domain: z.string().optional().describe('Domain the cookie is visible to'),
@@ -955,9 +1040,9 @@ server.registerTool(
                 .describe('Expiry date of the cookie as a Unix timestamp (seconds since epoch)'),
         },
     },
-    async ({ name, value, domain, path, secure, httpOnly, expiry }) => {
+    async ({ sessionId, name, value, domain, path, secure, httpOnly, expiry }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             const cookie = { name, value };
             if (domain !== undefined) cookie.domain = domain;
             if (path !== undefined) cookie.path = path;
@@ -983,6 +1068,7 @@ server.registerTool(
         description:
             'retrieves cookies from the current browser session. Returns all cookies or a specific cookie by name.',
         inputSchema: {
+            sessionId: sessionIdSchema,
             name: z
                 .string()
                 .optional()
@@ -991,9 +1077,9 @@ server.registerTool(
                 ),
         },
     },
-    async ({ name }) => {
+    async ({ sessionId, name }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             if (name) {
                 try {
                     const cookie = await driver.manage().getCookie(name);
@@ -1036,15 +1122,16 @@ server.registerTool(
         description:
             'deletes cookies from the current browser session. Can delete a specific cookie by name or all cookies.',
         inputSchema: {
+            sessionId: sessionIdSchema,
             name: z
                 .string()
                 .optional()
                 .describe('Name of the cookie to delete. If omitted, all cookies are deleted.'),
         },
     },
-    async ({ name }) => {
+    async ({ sessionId, name }) => {
         try {
-            const driver = getDriver();
+            const driver = getDriver(sessionId);
             if (name) {
                 await driver.manage().deleteCookie(name);
                 return {
@@ -1078,16 +1165,18 @@ server.registerTool(
         description:
             'retrieves browser diagnostics (console logs, JS errors, or network activity) captured via WebDriver BiDi',
         inputSchema: {
+            sessionId: sessionIdSchema,
             type: z
                 .enum(['console', 'errors', 'network'])
                 .describe('Type of diagnostic data to retrieve'),
             clear: z.boolean().optional().describe('Clear after returning (default: false)'),
         },
     },
-    async ({ type, clear = false }) => {
+    async ({ sessionId, type, clear = false }) => {
         try {
-            getDriver();
-            const bidi = state.bidi.get(state.currentSession);
+            const resolvedSessionId = getSessionId(sessionId);
+            getDriver(resolvedSessionId);
+            const bidi = state.bidi.get(resolvedSessionId);
             if (!bidi?.available) {
                 return {
                     content: [
@@ -1106,6 +1195,225 @@ server.registerTool(
         } catch (e) {
             return {
                 content: [{ type: 'text', text: `Error getting diagnostics: ${e.message}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+server.registerTool(
+    'start_vrt_browsers',
+    {
+        description:
+            'Starts two linked Selenium sessions for IE migration VRT: Edge IE mode for before and Chromium Edge for after. Returns both session IDs for use with every standard browser tool.',
+        inputSchema: {
+            beforeUrl: z.string().url().describe('Legacy page URL to open in Edge IE mode'),
+            afterUrl: z.string().url().describe('Migrated page URL to open in Chromium Edge'),
+            width: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe('CSS viewport width; default 1440'),
+            height: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe('CSS viewport height; default 900'),
+            beforeOptions: browserOptionsSchema,
+            afterOptions: browserOptionsSchema,
+        },
+    },
+    async ({ beforeUrl, afterUrl, width = 1440, height = 900, beforeOptions, afterOptions }) => {
+        const startedSessions = [];
+        try {
+            const launches = await Promise.allSettled([
+                launchBrowser('edge-ie', beforeOptions),
+                launchBrowser('edge', afterOptions),
+            ]);
+            for (const launch of launches) {
+                if (launch.status === 'fulfilled') startedSessions.push(launch.value);
+            }
+            const failedLaunch = launches.find((launch) => launch.status === 'rejected');
+            if (failedLaunch) throw failedLaunch.reason;
+            const [before, after] = launches.map((launch) => launch.value);
+
+            await Promise.all([before.driver.get(beforeUrl), after.driver.get(afterUrl)]);
+            await Promise.all([
+                ensureViewport(before.driver, width, height),
+                ensureViewport(after.driver, width, height),
+            ]);
+
+            const result = {
+                beforeSessionId: before.sessionId,
+                afterSessionId: after.sessionId,
+                captureContract: {
+                    width,
+                    height,
+                    mode: 'viewport',
+                    browserChrome: false,
+                    scrollX: 0,
+                    scrollY: 0,
+                    allowImageResize: false,
+                },
+                warnings: [...before.warnings, ...after.warnings],
+            };
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        } catch (e) {
+            await cleanUpSessions(startedSessions);
+            return {
+                content: [{ type: 'text', text: `Error starting VRT browsers: ${e.message}` }],
+                isError: true,
+            };
+        }
+    }
+);
+
+server.registerTool(
+    'vrt',
+    {
+        description:
+            'Captures the current page viewport from two Selenium sessions and compares the PNG files with Playwright Test. Operate each session into the equivalent UI state before calling this tool.',
+        inputSchema: {
+            beforeSessionId: z.string().describe('Session ID containing the expected IE view'),
+            afterSessionId: z.string().describe('Session ID containing the migrated Edge view'),
+            name: z.string().describe('Stable screen or checkpoint name used for artifacts'),
+            width: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe('CSS viewport width; default 1440'),
+            height: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe('CSS viewport height; default 900'),
+            maxDiffPixelRatio: z
+                .number()
+                .min(0)
+                .max(1)
+                .optional()
+                .describe('Maximum changed-pixel ratio; default 0.005'),
+            threshold: z
+                .number()
+                .min(0)
+                .max(1)
+                .optional()
+                .describe('Per-pixel color difference threshold; default 0.2'),
+        },
+    },
+    async ({
+        beforeSessionId,
+        afterSessionId,
+        name,
+        width = 1440,
+        height = 900,
+        maxDiffPixelRatio = 0.005,
+        threshold = 0.2,
+    }) => {
+        try {
+            if (beforeSessionId === afterSessionId) {
+                throw new Error('beforeSessionId and afterSessionId must be different');
+            }
+            const beforeDriver = getDriver(beforeSessionId);
+            const afterDriver = getDriver(afterSessionId);
+            await Promise.all([
+                ensureViewport(beforeDriver, width, height),
+                ensureViewport(afterDriver, width, height),
+            ]);
+
+            const [beforePng, afterPng] = await Promise.all([
+                beforeDriver.takeScreenshot(),
+                afterDriver.takeScreenshot(),
+            ]);
+            const beforeSize = pngDimensions(beforePng);
+            const afterSize = pngDimensions(afterPng);
+            if (
+                beforeSize.width !== afterSize.width ||
+                beforeSize.height !== afterSize.height ||
+                beforeSize.width !== width ||
+                beforeSize.height !== height
+            ) {
+                throw new Error(
+                    `Capture contract mismatch: expected ${width}x${height}, before is ${beforeSize.width}x${beforeSize.height}, after is ${afterSize.width}x${afterSize.height}. Images were not resized.`
+                );
+            }
+
+            const artifactRoot = resolve(
+                process.env.MCP_VRT_ARTIFACT_DIR || join(process.cwd(), 'artifacts', 'vrt')
+            );
+            const runDirectory = join(
+                artifactRoot,
+                safeArtifactName(name),
+                new Date().toISOString().replace(/[:.]/g, '-')
+            );
+            const baselineDirectory = join(runDirectory, 'baseline');
+            await mkdir(baselineDirectory, { recursive: true });
+            const beforePath = join(runDirectory, 'before.png');
+            const afterPath = join(runDirectory, 'after.png');
+            const expectedPath = join(baselineDirectory, 'expected.png');
+            await Promise.all([
+                writeFile(beforePath, beforePng, 'base64'),
+                writeFile(afterPath, afterPng, 'base64'),
+            ]);
+            await copyFile(beforePath, expectedPath);
+
+            const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
+            const configPath = join(packageRoot, 'src', 'vrt', 'playwright.config.js');
+            const playwrightCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+            let status = 'passed';
+            let runnerOutput = '';
+            try {
+                const { stdout, stderr } = await execFileAsync(
+                    playwrightCommand,
+                    ['playwright', 'test', '--config', configPath],
+                    {
+                        cwd: packageRoot,
+                        env: {
+                            ...process.env,
+                            MCP_VRT_RUN_DIR: runDirectory,
+                            MCP_VRT_ACTUAL_PATH: afterPath,
+                            MCP_VRT_MAX_DIFF_PIXEL_RATIO: String(maxDiffPixelRatio),
+                            MCP_VRT_THRESHOLD: String(threshold),
+                        },
+                        maxBuffer: 10 * 1024 * 1024,
+                    }
+                );
+                runnerOutput = `${stdout}\n${stderr}`.trim();
+            } catch (runnerError) {
+                status = 'different';
+                runnerOutput = `${runnerError.stdout || ''}\n${runnerError.stderr || ''}`.trim();
+            }
+
+            let diffPath;
+            try {
+                diffPath = await findDiffImage(join(runDirectory, 'test-results'));
+            } catch (_) {
+                // A passing comparison does not generate a diff image.
+            }
+            const result = {
+                status,
+                name,
+                capture: { width, height, browserChrome: false, resized: false },
+                comparison: { maxDiffPixelRatio, threshold },
+                artifacts: {
+                    runDirectory,
+                    before: beforePath,
+                    after: afterPath,
+                    diff: diffPath,
+                    report: join(runDirectory, 'report.json'),
+                },
+                playwrightOutput: runnerOutput,
+            };
+            return {
+                content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (e) {
+            return {
+                content: [{ type: 'text', text: `Error running VRT: ${e.message}` }],
                 isError: true,
             };
         }

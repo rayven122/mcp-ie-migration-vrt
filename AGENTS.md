@@ -1,13 +1,15 @@
 # AGENTS.md
 
-MCP server for Selenium WebDriver browser automation. JavaScript (ES Modules), Node.js, stdio transport (JSON-RPC 2.0).
+MCP server for Selenium WebDriver browser automation and paired IE-to-Edge visual regression testing. JavaScript (ES Modules), Node.js, stdio transport (JSON-RPC 2.0).
 
 ## File Map
 
 ```text
-src/lib/server.js                ← ALL server logic: tool definitions, state, helpers, cleanup
+src/lib/server.js                 ← Server logic: tools, sessions, VRT orchestration, cleanup
 src/lib/accessibility-snapshot.js ← Browser-side JS injected via executeScript to build accessibility tree
-bin/mcp-selenium.js              ← CLI entry point, spawns server.js as child process
+src/vrt/                          ← Playwright Test PNG comparison runner and config
+bin/mcp-ie-migration-vrt.js       ← Package entry point
+skills/ie-migration-vrt/          ← Agent workflow for paired-session comparison and repair
 test/mcp-client.mjs              ← Reusable MCP test client (JSON-RPC over stdio)
 test/*.test.mjs                  ← Tests grouped by feature
 test/fixtures/*.html             ← HTML files loaded via file:// URLs in tests
@@ -15,7 +17,7 @@ test/fixtures/*.html             ← HTML files loaded via file:// URLs in tests
 
 ## Architecture
 
-Server logic lives in `server.js`, with browser-injected scripts in separate files. 18 tools, 2 resources.
+Server logic lives in `server.js`, with browser-injected and Playwright comparison scripts in separate files. Existing Selenium tools accept an optional `sessionId`; `start_vrt_browsers` and `vrt` provide the paired-session workflow.
 
 State is a module-level object:
 ```js

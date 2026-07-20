@@ -1,15 +1,16 @@
 {
-    "name": "@rayven122/mcp-selenium",
-    "version": "0.2.5",
-    "description": "Selenium WebDriver MCP Server (rayven122 fork — adds Edge IE mode)",
+    "name": "@rayven122/mcp-ie-migration-vrt",
+    "version": "0.1.0",
+    "description": "MCP server for paired Edge IE mode and Chromium Edge visual regression testing",
     "type": "module",
     "main": "src/lib/server.js",
     "bin": {
-        "mcp-selenium": "bin/mcp-selenium.js"
+        "mcp-ie-migration-vrt": "bin/mcp-ie-migration-vrt.js"
     },
     "files": [
         "bin",
         "src",
+        "skills",
         "README.md",
         "LICENSE"
     ],
@@ -32,13 +33,14 @@
         "format:check": "biome format .",
         "lint": "biome lint .",
         "pack:dry-run": "npm pack --dry-run",
-        "test": "node --test --test-concurrency=1"
+        "test": "node scripts/run-tests.js"
     },
     "keywords": [],
     "author": "",
     "license": "MIT",
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.26.0",
+        "@playwright/test": "^1.55.0",
         "selenium-webdriver": "^4.18.1"
     },
     "devDependencies": {

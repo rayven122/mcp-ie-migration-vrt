@@ -17,6 +17,11 @@ export class McpClient {
     #buffer = '';
     #requestId = 0;
     #pending = new Map();
+    #env;
+
+    constructor(env = {}) {
+        this.#env = env;
+    }
 
     /**
      * Start the MCP server and initialize the connection.
@@ -24,6 +29,7 @@ export class McpClient {
     async start() {
         this.#process = spawn('node', [SERVER_PATH], {
             stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, ...this.#env },
         });
 
         this.#process.stdout.on('data', (chunk) => {
@@ -35,7 +41,9 @@ export class McpClient {
                 try {
                     const msg = JSON.parse(line);
                     if (msg.id !== undefined && this.#pending.has(msg.id)) {
-                        this.#pending.get(msg.id).resolve(msg);
+                        const pending = this.#pending.get(msg.id);
+                        clearTimeout(pending.timer);
+                        pending.resolve(msg);
                         this.#pending.delete(msg.id);
                     }
                 } catch {
@@ -52,7 +60,8 @@ export class McpClient {
         });
 
         this.#process.on('close', (code) => {
-            for (const [_id, { reject }] of this.#pending) {
+            for (const [_id, { reject, timer }] of this.#pending) {
+                clearTimeout(timer);
                 reject(new Error(`Server process exited unexpectedly (code ${code})`));
             }
             this.#pending.clear();
@@ -131,12 +140,17 @@ export class McpClient {
     async stop() {
         if (this.#process) {
             // Reject all pending requests
-            for (const [id, { reject }] of this.#pending) {
+            for (const [id, { reject, timer }] of this.#pending) {
+                clearTimeout(timer);
                 reject(new Error('Client stopped'));
                 this.#pending.delete(id);
             }
-            this.#process.kill('SIGTERM');
+            const child = this.#process;
             this.#process = null;
+            const closed = new Promise((resolve) => child.once('close', resolve));
+            child.kill('SIGTERM');
+            await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 2000))]);
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
         }
     }
 
@@ -144,10 +158,7 @@ export class McpClient {
         return new Promise((resolve, reject) => {
             const id = ++this.#requestId;
             const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params });
-            this.#pending.set(id, { resolve, reject });
-            this.#process.stdin.write(`${msg}\n`);
-
-            setTimeout(() => {
+            const timer = setTimeout(() => {
                 if (this.#pending.has(id)) {
                     this.#pending
                         .get(id)
@@ -155,6 +166,8 @@ export class McpClient {
                     this.#pending.delete(id);
                 }
             }, 30000);
+            this.#pending.set(id, { resolve, reject, timer });
+            this.#process.stdin.write(`${msg}\n`);
         });
     }
 

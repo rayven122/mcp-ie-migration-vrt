@@ -38,6 +38,7 @@ describe('MCP Server', () => {
             'press_key',
             'upload_file',
             'take_screenshot',
+            'accessibility_snapshot',
             'close_session',
             'get_element_attribute',
             'execute_script',
@@ -48,6 +49,8 @@ describe('MCP Server', () => {
             'get_cookies',
             'delete_cookie',
             'diagnostics',
+            'start_vrt_browsers',
+            'vrt',
         ];
 
         for (const name of expected) {
@@ -79,6 +82,18 @@ describe('MCP Server', () => {
                 tool.inputSchema.type,
                 'object',
                 `Tool "${tool.name}" schema should be type object`
+            );
+        }
+    });
+
+    it('should allow selecting a session on Selenium tools', async () => {
+        const tools = await client.listTools();
+        const toolsWithoutSessionSelection = ['start_browser', 'start_vrt_browsers', 'vrt'];
+        for (const tool of tools) {
+            if (toolsWithoutSessionSelection.includes(tool.name)) continue;
+            assert.ok(
+                tool.inputSchema.properties.sessionId,
+                `Tool "${tool.name}" should accept sessionId`
             );
         }
     });
