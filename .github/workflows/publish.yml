@@ -3,6 +3,11 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to publish
+        required: true
 
 permissions:
   contents: write
@@ -11,6 +16,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
     steps:
       - name: Checkout repository
@@ -50,8 +57,6 @@ jobs:
         run: npm run pack:dry-run
 
       - name: Validate release version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           package_version="$(node -p 'require("./package.json").version')"
           test "$RELEASE_TAG" = "v$package_version"
@@ -62,7 +67,9 @@ jobs:
       - name: Upload MCPB to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.mcpb --clobber
+        run: gh release upload "$RELEASE_TAG" dist/*.mcpb --clobber
 
       - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
