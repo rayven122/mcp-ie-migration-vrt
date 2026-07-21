@@ -1,6 +1,6 @@
 {
     "name": "@rayven122/mcp-ie-migration-vrt",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "MCP server for paired Edge IE mode and Chromium Edge visual regression testing",
     "type": "module",
     "main": "src/lib/server.js",

@@ -36,7 +36,6 @@ try {
     for (const path of [
         'bin',
         'src',
-        'skills',
         'LICENSE',
         'README.md',
         'package.json',
@@ -45,6 +44,7 @@ try {
         await cp(join(root, path), join(bundleRoot, path), { recursive: true });
     }
     await cp(manifestPath, join(bundleRoot, 'manifest.json'));
+    await cp(join(root, 'mcpb', '.mcpbignore'), join(bundleRoot, '.mcpbignore'));
 
     run('npm', ['ci', '--omit=dev', '--ignore-scripts'], bundleRoot);
     await mkdir(outputDirectory, { recursive: true });
