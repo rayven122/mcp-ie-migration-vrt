@@ -26,6 +26,11 @@ import { Options as SafariOptions } from 'selenium-webdriver/safari.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json');
+const vrtStandard = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../config/vrt-standard.json', import.meta.url)), 'utf8')
+);
+const defaultViewport = vrtStandard.viewports[vrtStandard.defaultViewport];
+const defaultComparison = vrtStandard.comparisons[vrtStandard.defaultComparison];
 
 const server = new McpServer(
     { name: 'MCP IE Migration VRT', version },
@@ -1220,18 +1225,25 @@ server.registerTool(
                 .int()
                 .positive()
                 .optional()
-                .describe('CSS viewport width; default 1440'),
+                .describe(`CSS viewport width; default ${defaultViewport.width}`),
             height: z
                 .number()
                 .int()
                 .positive()
                 .optional()
-                .describe('CSS viewport height; default 900'),
+                .describe(`CSS viewport height; default ${defaultViewport.height}`),
             beforeOptions: browserOptionsSchema,
             afterOptions: browserOptionsSchema,
         },
     },
-    async ({ beforeUrl, afterUrl, width = 1440, height = 900, beforeOptions, afterOptions }) => {
+    async ({
+        beforeUrl,
+        afterUrl,
+        width = defaultViewport.width,
+        height = defaultViewport.height,
+        beforeOptions,
+        afterOptions,
+    }) => {
         const startedSessions = [];
         try {
             const launches = await Promise.allSettled([
@@ -1290,35 +1302,39 @@ server.registerTool(
                 .int()
                 .positive()
                 .optional()
-                .describe('CSS viewport width; default 1440'),
+                .describe(`CSS viewport width; default ${defaultViewport.width}`),
             height: z
                 .number()
                 .int()
                 .positive()
                 .optional()
-                .describe('CSS viewport height; default 900'),
+                .describe(`CSS viewport height; default ${defaultViewport.height}`),
             maxDiffPixelRatio: z
                 .number()
                 .min(0)
                 .max(1)
                 .optional()
-                .describe('Maximum changed-pixel ratio; default 0.005'),
+                .describe(
+                    `Maximum changed-pixel ratio; default ${defaultComparison.maxDiffPixelRatio}`
+                ),
             threshold: z
                 .number()
                 .min(0)
                 .max(1)
                 .optional()
-                .describe('Per-pixel color difference threshold; default 0.2'),
+                .describe(
+                    `Per-pixel color difference threshold; default ${defaultComparison.threshold}`
+                ),
         },
     },
     async ({
         beforeSessionId,
         afterSessionId,
         name,
-        width = 1440,
-        height = 900,
-        maxDiffPixelRatio = 0.005,
-        threshold = 0.2,
+        width = defaultViewport.width,
+        height = defaultViewport.height,
+        maxDiffPixelRatio = defaultComparison.maxDiffPixelRatio,
+        threshold = defaultComparison.threshold,
     }) => {
         try {
             if (beforeSessionId === afterSessionId) {
@@ -1434,6 +1450,24 @@ server.registerTool(
 );
 
 // Resources
+server.registerResource(
+    'vrt-standard',
+    'vrt-standard://current',
+    {
+        description: 'Standard viewport, comparison thresholds, capture contract, and checkpoints',
+        mimeType: 'application/json',
+    },
+    async (uri) => ({
+        contents: [
+            {
+                uri: uri.href,
+                mimeType: 'application/json',
+                text: JSON.stringify(vrtStandard, null, 2),
+            },
+        ],
+    })
+);
+
 server.registerResource(
     'browser-status',
     'browser-status://current',

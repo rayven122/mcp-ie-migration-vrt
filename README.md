@@ -235,9 +235,13 @@ artifacts/vrt/order-search-result/<timestamp>/
 
 IEとChromiumではフォント描画が異なるため、初期値は`maxDiffPixelRatio=0.005`、`threshold=0.2`です。閾値を変更する前にdiff画像を確認してください。
 
+実案件の標準viewport、比較許容差、チェックポイントは[`docs/vrt-standard.md`](docs/vrt-standard.md)とMCP Resource `vrt-standard://current`を参照してください。機械可読な定義は[`config/vrt-standard.json`](config/vrt-standard.json)です。
+
 ## 開発
 
 MCPBは[modelcontextprotocol/mcpb](https://github.com/modelcontextprotocol/mcpb)のmanifest v0.3と公式CLIに準拠しています。ローカル生成では公式CLIの`validate`と`pack`を次のnpm scriptsから実行します。
+
+MCPB署名は公式CLIの既知不具合により現在保留しています。判断根拠と安全な有効化条件は[`docs/mcpb-signing.md`](docs/mcpb-signing.md)を参照してください。
 
 ```bash
 npm ci
@@ -258,6 +262,14 @@ npm run pack:dry-run
 テストにはChromeとChromeDriverが必要です。Edge IEモードの実機確認はWindows環境で行ってください。
 
 Windows/IIS上でASP.NET 4.xのVB.NET Web Formsまで確認する場合は、`test/fixtures/aspnet-vb4`を隔離したIISサイトへ配置し、対話セッションから次を実行します。
+
+最初に読み取り専用の事前診断を実行してください。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\Test-IeMigrationVrtPrerequisites.ps1
+```
+
+自動処理で結果を利用する場合は`-Json`を追加します。診断スクリプトは設定を変更しません。
 
 ```powershell
 $env:VRT_SMOKE_URL = 'http://localhost:8088/Default.aspx'

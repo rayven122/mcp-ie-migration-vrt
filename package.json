@@ -9,7 +9,11 @@
     },
     "files": [
         "bin",
+        "config",
+        "docs/mcpb-signing.md",
+        "docs/vrt-standard.md",
         "mcpb",
+        "scripts/windows",
         "src",
         "skills",
         "README.md",

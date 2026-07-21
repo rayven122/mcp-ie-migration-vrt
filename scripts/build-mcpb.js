@@ -35,6 +35,7 @@ try {
     await mkdir(bundleRoot, { recursive: true });
     for (const path of [
         'bin',
+        'config',
         'src',
         'LICENSE',
         'README.md',
@@ -43,6 +44,13 @@ try {
     ]) {
         await cp(join(root, path), join(bundleRoot, path), { recursive: true });
     }
+    await mkdir(join(bundleRoot, 'docs'), { recursive: true });
+    await cp(join(root, 'docs', 'mcpb-signing.md'), join(bundleRoot, 'docs', 'mcpb-signing.md'));
+    await cp(join(root, 'docs', 'vrt-standard.md'), join(bundleRoot, 'docs', 'vrt-standard.md'));
+    await mkdir(join(bundleRoot, 'scripts'), { recursive: true });
+    await cp(join(root, 'scripts', 'windows'), join(bundleRoot, 'scripts', 'windows'), {
+        recursive: true,
+    });
     await cp(manifestPath, join(bundleRoot, 'manifest.json'));
     await cp(join(root, 'mcpb', '.mcpbignore'), join(bundleRoot, '.mcpbignore'));
 

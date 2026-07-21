@@ -19,6 +19,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-prerequisites:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate Windows PowerShell syntax
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\scripts\windows\Test-IeMigrationVrtPrerequisites.ps1",
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw 'Windows prerequisite script contains syntax errors.'
+          }
+
   quality:
     runs-on: ubuntu-latest
 
