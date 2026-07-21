@@ -44,6 +44,8 @@ IEDriverの標準要件として、Internet Optionsの全セキュリティゾ�
 
 GitHub Releasesから`mcp-ie-migration-vrt-<version>.mcpb`をダウンロードし、Windows上で開いてClaude Desktopへインストールします。インストール画面では、VRT成果物と通常スクリーンショットの保存先を指定してください。
 
+MCPBにはMCPサーバーと実行時依存関係だけを収録しています。Skillは含まれないため、必要なエージェントへ次節の手順で別途インストールしてください。
+
 IEモードの起動には、MCPBとは別にEdgeのIEモードポリシー、IEDriverServer、対話ログオン済みのWindowsセッションが必要です。
 
 ### ローカルクローン
@@ -81,18 +83,24 @@ Claude DesktopなどのMCP設定:
 
 ## Skillのインストール
 
-Skillは[skills/ie-migration-vrt](skills/ie-migration-vrt)に含まれています。
+Skillは[skills/ie-migration-vrt](skills/ie-migration-vrt)から、Agent Skills CLIでインストールできます。
 
-プロジェクト単位で使用する場合:
+対話形式で対象エージェントとプロジェクト／グローバルを選ぶ場合:
 
-```powershell
-Copy-Item -Recurse skills\ie-migration-vrt C:\path\to\target-project\.claude\skills\
+```bash
+npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt
 ```
 
-Codexで共通利用する場合:
+Codexへプロジェクト単位で非対話インストールする場合:
 
-```powershell
-Copy-Item -Recurse skills\ie-migration-vrt $env:USERPROFILE\.agents\skills\
+```bash
+npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt --agent codex --yes
+```
+
+Claude Codeへグローバルインストールする場合:
+
+```bash
+npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt --agent claude-code --global --yes
 ```
 
 依頼例:
@@ -227,7 +235,7 @@ IEとChromiumではフォント描画が異なるため、初期値は`maxDiffPi
 
 ## 開発
 
-MCPBをローカル生成する場合:
+MCPBは[modelcontextprotocol/mcpb](https://github.com/modelcontextprotocol/mcpb)のmanifest v0.3と公式CLIに準拠しています。ローカル生成では公式CLIの`validate`と`pack`を次のnpm scriptsから実行します。
 
 ```bash
 npm ci
