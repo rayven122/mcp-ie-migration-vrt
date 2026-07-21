@@ -44,6 +44,12 @@ jobs:
       - name: Validate npm package contents
         run: npm run pack:dry-run
 
+      - name: Validate MCPB manifest
+        run: npm run mcpb:validate
+
+      - name: Build MCPB bundle
+        run: npm run mcpb:build
+
   test:
     runs-on: ubuntu-latest
     needs: quality

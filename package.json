@@ -9,6 +9,7 @@
     },
     "files": [
         "bin",
+        "mcpb",
         "src",
         "skills",
         "README.md",
@@ -25,9 +26,11 @@
         "access": "public"
     },
     "scripts": {
-        "audit": "npm audit --audit-level=high",
+        "audit": "npm audit --omit=dev --audit-level=high",
         "check": "biome check .",
         "ci": "npm run check && npm run audit && npm test && npm run pack:dry-run",
+        "mcpb:build": "node scripts/build-mcpb.js",
+        "mcpb:validate": "mcpb validate mcpb/manifest.json",
         "coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.js'",
         "format": "biome format --write .",
         "format:check": "biome format .",
@@ -44,6 +47,7 @@
         "selenium-webdriver": "^4.18.1"
     },
     "devDependencies": {
+        "@anthropic-ai/mcpb": "2.1.2",
         "@biomejs/biome": "2.5.1"
     }
 }

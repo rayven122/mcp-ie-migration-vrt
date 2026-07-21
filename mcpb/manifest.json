@@ -1,0 +1,64 @@
+{
+    "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest.schema.json",
+    "manifest_version": "0.3",
+    "name": "mcp-ie-migration-vrt",
+    "display_name": "IE Migration VRT",
+    "version": "0.1.0",
+    "description": "Compare Edge IE mode and Chromium Edge screens through paired Selenium sessions and Playwright visual regression testing.",
+    "long_description": "Operate an existing ASP.NET or VB.NET application in Edge IE mode and its migrated Chromium Edge version in independent Selenium sessions, then create same-size screenshots and visual regression evidence.",
+    "author": {
+        "name": "rayven122",
+        "url": "https://github.com/rayven122"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/rayven122/mcp-ie-migration-vrt"
+    },
+    "homepage": "https://github.com/rayven122/mcp-ie-migration-vrt",
+    "documentation": "https://github.com/rayven122/mcp-ie-migration-vrt#readme",
+    "support": "https://github.com/rayven122/mcp-ie-migration-vrt/issues",
+    "server": {
+        "type": "node",
+        "entry_point": "bin/mcp-ie-migration-vrt.js",
+        "mcp_config": {
+            "command": "node",
+            "args": ["${__dirname}/bin/mcp-ie-migration-vrt.js"],
+            "env": {
+                "MCP_VRT_ARTIFACT_DIR": "${user_config.vrt_artifact_directory}",
+                "MCP_SELENIUM_SCREENSHOT_DIR": "${user_config.screenshot_directory}"
+            }
+        }
+    },
+    "tools_generated": true,
+    "keywords": [
+        "mcp",
+        "selenium",
+        "visual-regression-testing",
+        "edge",
+        "ie-mode",
+        "asp.net",
+        "vb.net"
+    ],
+    "license": "MIT",
+    "user_config": {
+        "vrt_artifact_directory": {
+            "type": "directory",
+            "title": "VRT artifact directory",
+            "description": "Directory for before, after, and diff screenshots.",
+            "default": "${HOME}/Documents/ie-migration-vrt",
+            "required": true
+        },
+        "screenshot_directory": {
+            "type": "directory",
+            "title": "Screenshot directory",
+            "description": "Allowed root directory for Selenium screenshots.",
+            "default": "${HOME}/Documents/ie-migration-vrt",
+            "required": true
+        }
+    },
+    "compatibility": {
+        "claude_desktop": ">=0.10.0",
+        "platforms": ["win32"],
+        "runtimes": { "node": ">=18.0.0" }
+    }
+}
