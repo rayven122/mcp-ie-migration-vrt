@@ -70,7 +70,7 @@ jobs:
           cache: npm
 
       - name: Install Chrome (stable)
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
         id: setup-chrome
@@ -104,7 +104,7 @@ jobs:
           cache: npm
 
       - name: Install Chrome (stable)
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
         id: setup-chrome
