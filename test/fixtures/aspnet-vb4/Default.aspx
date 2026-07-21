@@ -10,6 +10,10 @@
     Protected Function IsIntentionalDiff() As Boolean
         Return String.Equals(Request.QueryString("variant"), "different", StringComparison.OrdinalIgnoreCase)
     End Function
+
+    Protected Function IsLayoutShift() As Boolean
+        Return String.Equals(Request.QueryString("variant"), "shifted", StringComparison.OrdinalIgnoreCase)
+    End Function
 </script>
 <html lang="ja">
 <head runat="server">
@@ -25,7 +29,16 @@
         .label, .value { display: table-cell; vertical-align: middle; }
         .label { width: 180px; font-weight: 600; }
         input[type=text] { width: 320px; height: 36px; border: 1px solid #8793a5; padding: 6px 10px; }
-        .button { margin-top: 18px; width: 160px; height: 40px; border: 0; border-radius: 4px; color: white; background: <%= If(IsIntentionalDiff(), "#c62828", "#1769aa") %>; }
+        .button {
+            margin-top: 18px;
+            margin-left: <%= If(IsLayoutShift(), "80px", "0") %>;
+            width: 160px;
+            height: 40px;
+            border: 0;
+            border-radius: 4px;
+            color: white;
+            background: <%= If(IsIntentionalDiff(), "#c62828", "#1769aa") %>;
+        }
         .status { display: inline-block; margin-left: 18px; font-weight: 600; }
     </style>
 </head>

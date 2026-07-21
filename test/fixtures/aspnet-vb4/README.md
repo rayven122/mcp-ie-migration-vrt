@@ -4,5 +4,6 @@ This Web Forms page is dynamically compiled as VB.NET by ASP.NET 4.x. It provide
 
 - `Default.aspx`: blue action button
 - `Default.aspx?variant=different`: red action button
+- `Default.aspx?variant=shifted`: blue action button shifted 80px to the right
 
 It is intended for isolated Windows/IIS integration checks, not production deployment.

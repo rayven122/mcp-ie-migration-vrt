@@ -66,6 +66,26 @@ try {
 
     await call('navigate', {
         sessionId: pair.afterSessionId,
+        url: `${baseUrl}?variant=shifted`,
+    });
+    await call('interact', {
+        sessionId: pair.afterSessionId,
+        action: 'click',
+        by: 'id',
+        value: 'IncrementButton',
+    });
+    await call('vrt', {
+        beforeSessionId: pair.beforeSessionId,
+        afterSessionId: pair.afterSessionId,
+        name: 'vbnet-button-layout-shift',
+        width,
+        height,
+        maxDiffPixelRatio: 0,
+        threshold: 0.1,
+    });
+
+    await call('navigate', {
+        sessionId: pair.afterSessionId,
         url: `${baseUrl}?variant=different`,
     });
     await call('interact', {
