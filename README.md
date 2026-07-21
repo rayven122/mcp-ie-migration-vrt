@@ -40,6 +40,12 @@ IEDriverの標準要件として、Internet Optionsの全セキュリティゾ�
 
 ## インストール
 
+### Claude Desktop（MCPB）
+
+GitHub Releasesから`mcp-ie-migration-vrt-<version>.mcpb`をダウンロードし、Windows上で開いてClaude Desktopへインストールします。インストール画面では、VRT成果物と通常スクリーンショットの保存先を指定してください。
+
+IEモードの起動には、MCPBとは別にEdgeのIEモードポリシー、IEDriverServer、対話ログオン済みのWindowsセッションが必要です。
+
 ### ローカルクローン
 
 ```powershell
@@ -220,6 +226,16 @@ artifacts/vrt/order-search-result/<timestamp>/
 IEとChromiumではフォント描画が異なるため、初期値は`maxDiffPixelRatio=0.005`、`threshold=0.2`です。閾値を変更する前にdiff画像を確認してください。
 
 ## 開発
+
+MCPBをローカル生成する場合:
+
+```bash
+npm ci
+npm run mcpb:validate
+npm run mcpb:build
+```
+
+生成物は`dist/mcp-ie-migration-vrt-<version>.mcpb`です。`v<package.jsonのversion>`形式のGitHub Releaseを公開すると、CIがMCPBをReleaseへ添付し、同じバージョンをnpmへTrusted Publishingで公開します。
 
 ```bash
 npm install
