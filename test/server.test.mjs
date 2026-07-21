@@ -121,7 +121,11 @@ describe('MCP Server', () => {
         const resources = await client.listResources();
         const uris = resources.map((r) => r.uri);
 
-        const expected = ['browser-status://current', 'accessibility://current'];
+        const expected = [
+            'vrt-standard://current',
+            'browser-status://current',
+            'accessibility://current',
+        ];
 
         for (const uri of expected) {
             assert.ok(uris.includes(uri), `Missing resource: ${uri}`);

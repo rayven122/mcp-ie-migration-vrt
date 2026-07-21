@@ -1,0 +1,84 @@
+{
+    "version": 1,
+    "defaultViewport": "windows-rdp",
+    "defaultComparison": "ie-migration",
+    "viewports": {
+        "windows-rdp": {
+            "width": 1200,
+            "height": 650,
+            "minimumDesktopWidth": 1280,
+            "minimumDesktopHeight": 800,
+            "description": "Proven Windows RDP baseline."
+        },
+        "large-desktop": {
+            "width": 1440,
+            "height": 900,
+            "minimumDesktopWidth": 1600,
+            "minimumDesktopHeight": 1080,
+            "description": "Use only when both browser windows fit without clipping."
+        }
+    },
+    "comparisons": {
+        "ie-migration": {
+            "maxDiffPixelRatio": 0.005,
+            "threshold": 0.2,
+            "description": "Default IE-to-Chromium layout regression threshold."
+        },
+        "pixel-strict": {
+            "maxDiffPixelRatio": 0,
+            "threshold": 0.1,
+            "description": "Controlled fixtures and intentional-difference checks only."
+        }
+    },
+    "capture": {
+        "mode": "viewport",
+        "browserChrome": false,
+        "scrollX": 0,
+        "scrollY": 0,
+        "allowImageResize": false,
+        "browserZoomPercent": 100,
+        "windowsDisplayScalePercent": 100
+    },
+    "checkpoints": [
+        {
+            "id": "initial-load",
+            "description": "Initial stable page after asynchronous rendering."
+        },
+        {
+            "id": "authenticated-home",
+            "description": "First authenticated screen with the same user and permissions."
+        },
+        {
+            "id": "search-results",
+            "description": "Search or filter results with identical criteria and data."
+        },
+        {
+            "id": "detail-view",
+            "description": "Record detail with the same record, tab, and expanded sections."
+        },
+        {
+            "id": "edit-form",
+            "description": "Edit form populated with identical values without saving."
+        },
+        {
+            "id": "validation-error",
+            "description": "Equivalent validation messages and field state."
+        },
+        {
+            "id": "dialog-open",
+            "description": "Modal or confirmation dialog opened from the same action."
+        },
+        {
+            "id": "post-action",
+            "description": "Stable result after an explicitly authorized, reversible test action."
+        },
+        {
+            "id": "empty-state",
+            "description": "No-result or no-data state using the same test data."
+        },
+        {
+            "id": "scroll-section",
+            "description": "Named below-the-fold section at an agreed scroll position."
+        }
+    ]
+}
