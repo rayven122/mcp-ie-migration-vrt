@@ -2,8 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(import.meta.dirname, '..');
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const manifestPath = join(root, 'mcpb', 'manifest.json');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -48,7 +49,16 @@ try {
     run('npm', ['ci', '--omit=dev', '--ignore-scripts'], bundleRoot);
     await mkdir(outputDirectory, { recursive: true });
     await rm(output, { force: true });
-    run('npx', ['--no-install', 'mcpb', 'pack', bundleRoot, output], root);
+    run(
+        process.execPath,
+        [
+            join(root, 'node_modules', '@anthropic-ai', 'mcpb', 'dist', 'cli', 'cli.js'),
+            'pack',
+            bundleRoot,
+            output,
+        ],
+        root
+    );
 
     const metadata = { package: packageJson.name, version: packageJson.version, artifact: output };
     await writeFile(
