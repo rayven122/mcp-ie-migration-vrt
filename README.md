@@ -88,20 +88,22 @@ Skillは[skills/ie-migration-vrt](skills/ie-migration-vrt)から、Agent Skills 
 対話形式で対象エージェントとプロジェクト／グローバルを選ぶ場合:
 
 ```bash
-npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt
+npx skills add rayven122/mcp-ie-migration-vrt
 ```
 
-Codexへプロジェクト単位で非対話インストールする場合:
+Codexへプロジェクト単位でインストールする場合:
 
 ```bash
-npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt --agent codex --yes
+npx skills add rayven122/mcp-ie-migration-vrt --agent codex
 ```
 
 Claude Codeへグローバルインストールする場合:
 
 ```bash
-npx skills add rayven122/mcp-ie-migration-vrt --skill ie-migration-vrt --agent claude-code --global --yes
+npx skills add rayven122/mcp-ie-migration-vrt --agent claude-code --global
 ```
+
+確認を省略するCIなどの非対話実行時だけ、`--yes`を追加してください。リポジトリ内のSkillが複数になった場合は、`--skill ie-migration-vrt`で対象を限定できます。
 
 依頼例:
 
