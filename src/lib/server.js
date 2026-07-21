@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -421,7 +422,7 @@ const launchBrowser = async (browser, options = {}) => {
             throw new Error(`Unsupported browser: ${browser}`);
     }
 
-    const sessionId = `${browser}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `${browser}_${Date.now()}_${randomUUID()}`;
     state.drivers.set(sessionId, driver);
     state.currentSession = sessionId;
 

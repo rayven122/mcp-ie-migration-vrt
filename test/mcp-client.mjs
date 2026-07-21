@@ -20,7 +20,7 @@ export class McpClient {
     #env;
     #requestTimeoutMs;
 
-    constructor(env = {}, requestTimeoutMs = 30000) {
+    constructor(env = {}, requestTimeoutMs = 60000) {
         this.#env = env;
         this.#requestTimeoutMs = requestTimeoutMs;
     }
