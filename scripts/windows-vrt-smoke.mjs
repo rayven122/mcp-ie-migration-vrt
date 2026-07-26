@@ -3,14 +3,10 @@ import { getResponseText, McpClient } from '../test/mcp-client.mjs';
 
 const baseUrl = process.env.VRT_SMOKE_URL ?? 'http://localhost:8088/Default.aspx';
 const outputPath = process.env.VRT_SMOKE_OUTPUT ?? 'C:\\vrt-lab\\smoke-result.json';
+const artifactDirectory = process.env.VRT_SMOKE_ARTIFACT_DIR ?? 'C:\\vrt-lab\\artifacts';
 const width = Number(process.env.VRT_SMOKE_WIDTH ?? 1200);
 const height = Number(process.env.VRT_SMOKE_HEIGHT ?? 650);
-const client = new McpClient(
-    {
-        MCP_VRT_ARTIFACT_DIR: process.env.MCP_VRT_ARTIFACT_DIR ?? 'C:\\vrt-lab\\artifacts',
-    },
-    120000
-);
+const client = new McpClient({}, 300000);
 const report = { startedAt: new Date().toISOString(), baseUrl, steps: [] };
 
 const call = async (name, args) => {
@@ -62,6 +58,7 @@ try {
         height,
         maxDiffPixelRatio: 0.005,
         threshold: 0.2,
+        outputDirectory: artifactDirectory,
     });
 
     await call('navigate', {
@@ -82,6 +79,7 @@ try {
         height,
         maxDiffPixelRatio: 0,
         threshold: 0.1,
+        outputDirectory: artifactDirectory,
     });
 
     await call('navigate', {
@@ -102,6 +100,7 @@ try {
         height,
         maxDiffPixelRatio: 0,
         threshold: 0.1,
+        outputDirectory: artifactDirectory,
     });
     report.steps.push({
         name: 'vrt-intentional-difference',

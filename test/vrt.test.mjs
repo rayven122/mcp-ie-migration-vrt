@@ -12,7 +12,7 @@ describe('VRT', () => {
     const artifactRoot = path.join(process.cwd(), 'test-vrt-artifacts');
 
     before(async () => {
-        client = new McpClient({ MCP_VRT_ARTIFACT_DIR: artifactRoot });
+        client = new McpClient();
         await client.start();
     });
 
@@ -42,11 +42,13 @@ describe('VRT', () => {
             name: 'identical-pages',
             width: 800,
             height: 600,
+            outputDirectory: artifactRoot,
         });
         const response = JSON.parse(getResponseText(result));
         assert.equal(response.status, 'passed', JSON.stringify(response, null, 2));
         assert.equal(response.capture.width, 800);
         assert.equal(response.capture.height, 600);
+        assert.ok(response.artifacts.runDirectory.startsWith(artifactRoot));
         await fs.access(response.artifacts.before);
         await fs.access(response.artifacts.after);
         await fs.access(response.artifacts.report);

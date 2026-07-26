@@ -47,6 +47,7 @@ try {
     await mkdir(join(bundleRoot, 'docs'), { recursive: true });
     await cp(join(root, 'docs', 'mcpb-signing.md'), join(bundleRoot, 'docs', 'mcpb-signing.md'));
     await cp(join(root, 'docs', 'vrt-standard.md'), join(bundleRoot, 'docs', 'vrt-standard.md'));
+    await cp(join(root, 'mcpb', 'icon.png'), join(bundleRoot, 'icon.png'));
     await mkdir(join(bundleRoot, 'scripts'), { recursive: true });
     await cp(join(root, 'scripts', 'windows'), join(bundleRoot, 'scripts', 'windows'), {
         recursive: true,
