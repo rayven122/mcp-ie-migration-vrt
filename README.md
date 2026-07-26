@@ -31,7 +31,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\Test-IeMigrationVrtPrer
 
 [最新のGitHub Release](https://github.com/rayven122/mcp-ie-migration-vrt/releases/latest)から`.mcpb`をダウンロードし、Windows上で開いてClaude Desktopへインストールします。
 
-インストール画面でVRT成果物と通常スクリーンショットの保存先を指定してください。MCPBにはMCPサーバーと実行時依存関係が含まれます。
+保存先の初期設定は不要です。MCPBにはMCPサーバーと実行時依存関係が含まれます。
 
 ### 2. Skillをインストール
 
@@ -86,6 +86,7 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 | `execute_script` | DOM・computed style・スクロールを確認 |
 | `diagnostics` | console・JavaScript error・networkログを取得 |
 | `vrt` | 2セッションの現在画面を比較 |
+| `take_screenshot` | 現在画面を返すか、`outputPath`で指定した場所へ保存 |
 | `close_session` | 指定セッションを終了 |
 
 その他のSelenium Toolも`sessionId`を指定して利用できます。
@@ -93,7 +94,8 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 ## 補足
 
 - Windows/IIS・ASP.NET 4.8・VB.NET Web Formsで動作確認済みです。
-- VRT成果物の保存先は`MCP_VRT_ARTIFACT_DIR`で変更できます。
+- VRT成果物は既定で相対パス`artifacts/vrt`へ保存されます。呼び出しごとに`vrt.outputDirectory`で変更できます。
+- 通常スクリーンショットは既定で画像データを直接返します。保存する場合だけ`take_screenshot.outputPath`を指定します。
 - MCPB署名は公式CLIの既知不具合により保留中です。詳細は[`docs/mcpb-signing.md`](docs/mcpb-signing.md)を参照してください。
 - 開発・ローカルビルドは[`package.json`](package.json)のnpm scriptsを参照してください。
 

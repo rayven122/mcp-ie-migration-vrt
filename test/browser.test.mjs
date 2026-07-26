@@ -4,7 +4,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fixture, getResponseText, McpClient } from './mcp-client.mjs';
@@ -125,8 +127,8 @@ describe('Browser Management', () => {
             );
         });
 
-        it('should save screenshots only inside the working directory', async () => {
-            const outputPath = path.join(process.cwd(), 'test-output-screenshot.png');
+        it('should save screenshots to the path supplied by the tool call', async () => {
+            const outputPath = path.join(os.tmpdir(), `mcp-screenshot-${randomUUID()}.png`);
             try {
                 const result = await client.callTool('take_screenshot', { outputPath });
                 const text = getResponseText(result);
@@ -142,22 +144,6 @@ describe('Browser Management', () => {
             } finally {
                 await fs.rm(outputPath, { force: true });
             }
-        });
-
-        it('should reject screenshot paths outside the working directory', async () => {
-            const result = await client.callTool('take_screenshot', {
-                outputPath: '/tmp/mcp-selenium-outside.png',
-            });
-            const text = getResponseText(result);
-            assert.strictEqual(
-                result.isError,
-                true,
-                'Expected isError: true for outside outputPath'
-            );
-            assert.ok(
-                text.includes('inside'),
-                `Expected directory restriction message, got: ${text}`
-            );
         });
     });
 

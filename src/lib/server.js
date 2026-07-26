@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -145,8 +145,6 @@ const validateNavigationUrl = (url) => {
     }
 };
 
-const screenshotRoot = () => resolve(process.env.MCP_SELENIUM_SCREENSHOT_DIR || process.cwd());
-
 const resolveScreenshotOutputPath = (outputPath) => {
     if (outputPath.includes('\0')) {
         throw new Error('Screenshot outputPath must not contain NUL bytes');
@@ -155,13 +153,7 @@ const resolveScreenshotOutputPath = (outputPath) => {
         throw new Error('Screenshot outputPath must end with .png');
     }
 
-    const root = screenshotRoot();
-    const resolvedPath = isAbsolute(outputPath) ? resolve(outputPath) : resolve(root, outputPath);
-    const relativePath = relative(root, resolvedPath);
-    if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
-        throw new Error(`Screenshot outputPath must be inside ${root}`);
-    }
-    return resolvedPath;
+    return isAbsolute(outputPath) ? resolve(outputPath) : resolve(process.cwd(), outputPath);
 };
 
 // BiDi helpers
@@ -284,10 +276,10 @@ const pngDimensions = (base64) => {
 };
 
 const ensureViewport = async (driver, width, height) => {
+    const readViewport =
+        'return { width: document.documentElement.clientWidth || document.body.clientWidth, height: document.documentElement.clientHeight || document.body.clientHeight };';
     for (let attempt = 0; attempt < 4; attempt += 1) {
-        const viewport = await driver.executeScript(
-            'return { width: window.innerWidth, height: window.innerHeight };'
-        );
+        const viewport = await driver.executeScript(readViewport);
         if (viewport.width === width && viewport.height === height) {
             await driver.executeScript('window.scrollTo(0, 0);');
             return viewport;
@@ -301,9 +293,7 @@ const ensureViewport = async (driver, width, height) => {
                 height: rect.height + (height - viewport.height),
             });
     }
-    const viewport = await driver.executeScript(
-        'return { width: window.innerWidth, height: window.innerHeight };'
-    );
+    const viewport = await driver.executeScript(readViewport);
     throw new Error(
         `Unable to set viewport to ${width}x${height}; actual viewport is ${viewport.width}x${viewport.height}`
     );
@@ -690,7 +680,7 @@ server.registerTool(
                 .string()
                 .optional()
                 .describe(
-                    'Optional path where to save the screenshot. If not provided, returns an image/png content block.'
+                    'Optional .png path where to save the screenshot. Relative paths use the server working directory; absolute paths are also accepted. If not provided, returns an image/png content block.'
                 ),
         },
     },
@@ -1325,6 +1315,12 @@ server.registerTool(
                 .describe(
                     `Per-pixel color difference threshold; default ${defaultComparison.threshold}`
                 ),
+            outputDirectory: z
+                .string()
+                .optional()
+                .describe(
+                    'Optional directory for this VRT run. Relative paths use the server working directory; defaults to artifacts/vrt.'
+                ),
         },
     },
     async ({
@@ -1335,6 +1331,7 @@ server.registerTool(
         height = defaultViewport.height,
         maxDiffPixelRatio = defaultComparison.maxDiffPixelRatio,
         threshold = defaultComparison.threshold,
+        outputDirectory,
     }) => {
         try {
             if (beforeSessionId === afterSessionId) {
@@ -1364,9 +1361,9 @@ server.registerTool(
                 );
             }
 
-            const artifactRoot = resolve(
-                process.env.MCP_VRT_ARTIFACT_DIR || join(process.cwd(), 'artifacts', 'vrt')
-            );
+            const artifactRoot = outputDirectory
+                ? resolve(outputDirectory)
+                : resolve(process.cwd(), 'artifacts', 'vrt');
             const runDirectory = join(
                 artifactRoot,
                 safeArtifactName(name),
