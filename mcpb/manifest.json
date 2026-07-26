@@ -17,6 +17,7 @@
     "homepage": "https://github.com/rayven122/mcp-ie-migration-vrt",
     "documentation": "https://github.com/rayven122/mcp-ie-migration-vrt#readme",
     "support": "https://github.com/rayven122/mcp-ie-migration-vrt/issues",
+    "icon": "icon.png",
     "server": {
         "type": "node",
         "entry_point": "bin/mcp-ie-migration-vrt.js",
