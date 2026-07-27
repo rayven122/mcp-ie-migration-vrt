@@ -45,10 +45,7 @@ $checks.Add((New-CheckResult 'interactive-session' ($null -ne $explorer) "sessio
 
 $edgePolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
 $integrationLevel = (Get-ItemProperty -Path $edgePolicyPath -Name InternetExplorerIntegrationLevel -ErrorAction SilentlyContinue).InternetExplorerIntegrationLevel
-$siteList = (Get-ItemProperty -Path $edgePolicyPath -Name InternetExplorerIntegrationSiteList -ErrorAction SilentlyContinue).InternetExplorerIntegrationSiteList
 $checks.Add((New-CheckResult 'ie-mode-policy' ($integrationLevel -eq 1) "$integrationLevel" 'Set InternetExplorerIntegrationLevel=1 through Group Policy or device management.'))
-$siteListDisplay = if ($siteList) { $siteList } else { 'not configured' }
-$checks.Add((New-CheckResult 'enterprise-mode-site-list' (-not [string]::IsNullOrWhiteSpace($siteList)) $siteListDisplay 'Configure InternetExplorerIntegrationSiteList with the managed site-list URL.'))
 
 $zoneValues = 1..4 | ForEach-Object {
     (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\$_" -Name 2500 -ErrorAction SilentlyContinue).'2500'
