@@ -12,12 +12,13 @@ Chromium Edge ─ Selenium screenshot ─┘
 
 - Windows 10/11またはWindows Server
 - Microsoft Edge Stable
-- Edge IEモードとEnterprise Mode Site List
+- Edge IEモードポリシー（`InternetExplorerIntegrationLevel=1`）
 - IEDriverServer 4.0.0.0以上
 - ログオン中の非昇格Windowsセッション
 - Edge/IEズームとWindows表示倍率を100%に固定
 
 IEモードはheadless実行できません。RDP利用中は、撮影の途中で解像度や表示倍率を変更しないでください。
+IEDriverがEdgeをIEモードで起動するため、Enterprise Mode Site Listは必須ではありません。
 
 事前診断:
 
