@@ -13,7 +13,7 @@
 - [x] **M0** CI解放 + 足場
 - [x] **M1** `schema.sql` + `store/db.mjs` + `store/facts.mjs` — バイテンポラルの核
 - [x] **M2** 正規化2層（mapping / fallback / context / units）
-- [ ] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs` ← M4を先行させたため次はここ
+- [x] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs` + `edinet/csv.mjs`
 - [x] **M4** `query/financials.mjs` — **仮説の証明 → 達成**
 - [ ] **M5** `mcp/server.mjs`（余力分）
 - [ ] **M6** `gbiz/client.mjs` updateInfo差分（余力分）
@@ -153,6 +153,38 @@ Member軸判定がこれをセグメントとして捨てていた。M2のテス
 
 **教訓**: 合成フィクスチャでも「実データの形」に寄せないと、
 テストが通っているのに実データで壊れる。M3のフィクスチャは実CSV形式で作る。
+
+### M3 — EDINETクライアントとパーサ
+
+- `edinet/client.mjs`: API v2 クライアント。**transport注入**でネットワーク無しに検証可能。
+  日付走査は generator（10年分は数十万書類。全部メモリに載せない・途中で止められる）
+- `edinet/codelist.mjs`: コードリストのパース、検査用数字、充足率集計。
+  **node:sqlite に依存しない**ので任意のNodeバージョンで動く
+- `edinet/csv.mjs`: type=5 文書CSV（UTF-16LE・タブ区切り）の読み取り
+- `docs/research/scripts/edinet-corporate-number-coverage.mjs` を
+  `codelist.mjs` を使う形にリファクタ。**重複実装を削除**。
+  既存フィクスチャで出力が完全一致することを確認済み
+- `test/edinet-client.test.mjs` + `test/edinet-parsers.test.mjs`、合計98件緑
+
+**設計の要点**
+
+- **4xxはリトライしない。** サーバが「リクエストが不正」と判断したものを繰り返しても
+  同じ結果で、公的インフラに無駄な負荷をかけるだけ。429と5xxと通信エラーのみ再試行
+- **リクエスト間隔とバックオフを注入可能に。** テストが実際に待たないので高速に検証できる
+- **会計年度は期末から逆算**。1〜3月期末は前年度（日本の会計年度は開始年で呼ぶ）。
+  ここを1年ずらすと3月決算企業＝市場の大半が全部ずれる
+- **提出時刻はJST→UTC変換**。`known_from` の元になるため、ずれると訂正の
+  タイムライン順序が壊れる。夕方のJST提出がUTCで前日になるケースをテストで固定
+
+**M3で見つかった実バグ**
+
+BOMなしUTF-16LEの判定を「2バイト目がNUL」で書いていたが、
+**実データの見出しは `要素ID` = 非ASCIIで始まる**ため成立しない（`要` は 0x81 0x89）。
+つまりUTF-16が必要なファイルに限ってUTF-8と誤判定する。
+→ 必要な見出し文字列が実際に現れるデコードを選ぶ方式に変更。
+どちらでも現れなければUTF-8を返し、パーサ側が明確なエラーを出す。
+
+**教訓（M4と同じ）**: 実データの形に寄せたテストでないと、通っているのに壊れる。
 
 ---
 

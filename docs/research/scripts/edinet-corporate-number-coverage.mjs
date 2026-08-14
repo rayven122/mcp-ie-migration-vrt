@@ -21,75 +21,15 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+// パーサと検査用数字はプロトタイプ側のモジュールが正。ここで再実装しない。
+import {
+    parseCodeList,
+    summarizeCorporateNumbers,
+} from '../../../prototype/edinet-pit/src/edinet/codelist.mjs';
 
 const CODELIST_URL =
     'https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip';
 const GBIZ_BASE = 'https://api.info.gbiz.go.jp/hojin/v2/hojin';
-
-/** RFC4180 相当のCSVパーサ。所在地に読点や引用符が入るため自前で処理する。 */
-function parseCsv(text) {
-    const rows = [];
-    let row = [];
-    let field = '';
-    let quoted = false;
-
-    for (let i = 0; i < text.length; i += 1) {
-        const ch = text[i];
-
-        if (quoted) {
-            if (ch === '"') {
-                if (text[i + 1] === '"') {
-                    field += '"';
-                    i += 1;
-                } else {
-                    quoted = false;
-                }
-            } else {
-                field += ch;
-            }
-            continue;
-        }
-
-        if (ch === '"') {
-            quoted = true;
-        } else if (ch === ',') {
-            row.push(field);
-            field = '';
-        } else if (ch === '\n') {
-            row.push(field);
-            rows.push(row);
-            row = [];
-            field = '';
-        } else if (ch !== '\r') {
-            field += ch;
-        }
-    }
-
-    if (field !== '' || row.length > 0) {
-        row.push(field);
-        rows.push(row);
-    }
-    return rows;
-}
-
-/**
- * 法人番号の検査用数字を検証する（国税庁の仕様）。
- * 法人番号 = 検査用数字1桁 + 基礎番号12桁
- * 検査用数字 = 9 - (Σ P_n × Q_n) mod 9   P_n: 基礎番号の下位n桁目, Q_n: nが奇数→1, 偶数→2
- */
-function isValidCorporateNumber(value) {
-    if (!/^\d{13}$/.test(value)) {
-        return false;
-    }
-    const check = Number(value[0]);
-    const base = value.slice(1);
-    let sum = 0;
-    for (let n = 1; n <= 12; n += 1) {
-        const digit = Number(base[12 - n]);
-        sum += digit * (n % 2 === 1 ? 1 : 2);
-    }
-    return check === 9 - (sum % 9);
-}
 
 function fetchCodeListZip() {
     process.stderr.write(`fetching ${CODELIST_URL}\n`);
@@ -128,32 +68,19 @@ function pct(numerator, denominator) {
     return `${((numerator / denominator) * 100).toFixed(2)}%`;
 }
 
-function tally(rows, keyFn) {
-    const buckets = new Map();
-    for (const row of rows) {
-        const key = keyFn(row) || '(空)';
-        const bucket = buckets.get(key) || { total: 0, withNumber: 0 };
-        bucket.total += 1;
-        if (row.corporateNumber !== '') {
-            bucket.withNumber += 1;
-        }
-        buckets.set(key, bucket);
-    }
-    return [...buckets.entries()].sort((a, b) => b[1].total - a[1].total);
-}
-
-function printTable(title, entries) {
-    console.log(`\n## ${title}`);
+function printTypeTable(byType) {
+    console.log('\n## 提出者種別ごと（個人・外国法人は法人番号を持たないのが正常）');
     console.log('| 区分 | 件数 | 法人番号あり | 充足率 |');
     console.log('|---|---:|---:|---:|');
-    for (const [key, bucket] of entries) {
+    for (const [type, bucket] of byType) {
         console.log(
-            `| ${key} | ${bucket.total} | ${bucket.withNumber} | ${pct(bucket.withNumber, bucket.total)} |`
+            `| ${type} | ${bucket.total} | ${bucket.withNumber} |` +
+                ` ${pct(bucket.withNumber, bucket.total)} |`
         );
     }
 }
 
-async function sampleGbiz(rows, sampleSize) {
+async function sampleGbiz(records, sampleSize) {
     const token = process.env.GBIZ_API_TOKEN;
     if (!token) {
         console.log('\n[skip] GBIZ_API_TOKEN が未設定のため gBizINFO 照会は行いません。');
@@ -161,7 +88,7 @@ async function sampleGbiz(rows, sampleSize) {
     }
 
     // 上場かつ法人番号ありの母集団から等間隔に抽出（先頭偏りを避ける）
-    const pool = rows.filter((r) => r.corporateNumber !== '' && r.secCode !== '');
+    const pool = records.filter((r) => r.corporateNumber !== '' && r.isListed);
     const step = Math.max(1, Math.floor(pool.length / sampleSize));
     const sample = [];
     for (let i = 0; i < pool.length && sample.length < sampleSize; i += step) {
@@ -173,20 +100,21 @@ async function sampleGbiz(rows, sampleSize) {
     let missing = 0;
     const failures = [];
 
-    for (const row of sample) {
-        const url = `${GBIZ_BASE}/${row.corporateNumber}`;
+    for (const record of sample) {
         try {
-            const res = await fetch(url, { headers: { 'X-hojinInfo-api-token': token } });
+            const res = await fetch(`${GBIZ_BASE}/${record.corporateNumber}`, {
+                headers: { 'X-hojinInfo-api-token': token },
+            });
             if (res.ok) {
                 found += 1;
             } else if (res.status === 404) {
                 missing += 1;
-                failures.push(`${row.corporateNumber} ${row.name} → 404`);
+                failures.push(`${record.corporateNumber} ${record.name} → 404`);
             } else {
-                failures.push(`${row.corporateNumber} ${row.name} → HTTP ${res.status}`);
+                failures.push(`${record.corporateNumber} ${record.name} → HTTP ${res.status}`);
             }
         } catch (err) {
-            failures.push(`${row.corporateNumber} ${row.name} → ${err.message}`);
+            failures.push(`${record.corporateNumber} ${record.name} → ${err.message}`);
         }
         // 公的APIに対する礼儀。リクエスト上限があるため詰めて叩かない。
         await new Promise((resolve) => setTimeout(resolve, 250));
@@ -214,132 +142,67 @@ async function main() {
         process.exit(2);
     }
 
-    const text = loadCsvText(inputPath, shouldFetch);
-    const raw = parseCsv(text);
-
-    // 1行目はダウンロード日時等のメタ行。'EDINETコード' を含む行を見出しとして採用する。
-    const headerIndex = raw.findIndex((r) => r.some((c) => c.trim() === 'EDINETコード'));
-    if (headerIndex === -1) {
-        console.error('見出し行が見つかりません。CP932デコードとファイル種別を確認してください。');
-        process.exit(1);
-    }
-    const header = raw[headerIndex].map((c) => c.trim());
-    const col = (name) => header.indexOf(name);
-
-    const idx = {
-        edinetCode: col('EDINETコード'),
-        submitterType: col('提出者種別'),
-        listed: col('上場区分'),
-        name: col('提出者名'),
-        industry: col('提出者業種'),
-        secCode: col('証券コード'),
-        corporateNumber: col('提出者法人番号'),
-    };
-
-    const missingCols = Object.entries(idx)
-        .filter(([, v]) => v === -1)
-        .map(([k]) => k);
-    if (missingCols.length > 0) {
-        console.error(`想定列が見つかりません: ${missingCols.join(', ')}`);
-        console.error(`実際の見出し: ${header.join(' | ')}`);
-        process.exit(1);
-    }
-
-    const rows = raw
-        .slice(headerIndex + 1)
-        .filter((r) => (r[idx.edinetCode] || '').trim() !== '')
-        .map((r) => ({
-            edinetCode: (r[idx.edinetCode] || '').trim(),
-            submitterType: (r[idx.submitterType] || '').trim(),
-            listed: (r[idx.listed] || '').trim(),
-            name: (r[idx.name] || '').trim(),
-            industry: (r[idx.industry] || '').trim(),
-            secCode: (r[idx.secCode] || '').trim(),
-            corporateNumber: (r[idx.corporateNumber] || '').trim(),
-        }));
-
-    const withNumber = rows.filter((r) => r.corporateNumber !== '');
-    const malformed = withNumber.filter((r) => !/^\d{13}$/.test(r.corporateNumber));
-    const badCheckDigit = withNumber.filter(
-        (r) => /^\d{13}$/.test(r.corporateNumber) && !isValidCorporateNumber(r.corporateNumber)
-    );
-
-    const byNumber = new Map();
-    for (const row of withNumber) {
-        const list = byNumber.get(row.corporateNumber) || [];
-        list.push(row);
-        byNumber.set(row.corporateNumber, list);
-    }
-    const duplicates = [...byNumber.entries()].filter(([, list]) => list.length > 1);
-
-    const listedRows = rows.filter((r) => r.secCode !== '');
+    const records = parseCodeList(loadCsvText(inputPath, shouldFetch));
+    const summary = summarizeCorporateNumbers(records);
 
     console.log('# EDINETコード一覧 法人番号 充足率レポート');
-    console.log(`\n- 総提出者数: ${rows.length}`);
-    console.log(`- 証券コードあり（上場相当）: ${listedRows.length}`);
+    console.log(`\n- 総提出者数: ${summary.total}`);
+    console.log(`- 証券コードあり（上場相当）: ${summary.listed}`);
     console.log(
-        `- 法人番号あり: ${withNumber.length} (${pct(withNumber.length, rows.length)})` +
-            ` / 上場相当のみ: ${listedRows.filter((r) => r.corporateNumber !== '').length}` +
-            ` (${pct(
-                listedRows.filter((r) => r.corporateNumber !== '').length,
-                listedRows.length
-            )})`
+        `- 法人番号あり: ${summary.withNumber} (${pct(summary.withNumber, summary.total)})` +
+            ` / 上場相当のみ: ${summary.listedWithNumber}` +
+            ` (${pct(summary.listedWithNumber, summary.listed)})`
     );
-    console.log(`- 13桁でない値: ${malformed.length}`);
-    console.log(`- 検査用数字が不正: ${badCheckDigit.length}`);
-    console.log(`- 同一法人番号に複数EDINETコード: ${duplicates.length}組`);
+    console.log(`- 13桁でない値: ${summary.malformed.length}`);
+    console.log(`- 検査用数字が不正: ${summary.badCheckDigit.length}`);
+    console.log(`- 同一法人番号に複数EDINETコード: ${summary.duplicates.length}組`);
 
-    printTable(
-        '提出者種別ごと（個人・外国法人は法人番号を持たないのが正常）',
-        tally(rows, (r) => r.submitterType)
-    );
-    printTable(
-        '上場区分ごと',
-        tally(rows, (r) => r.listed)
-    );
+    printTypeTable(summary.byType);
 
-    if (duplicates.length > 0) {
+    if (summary.duplicates.length > 0) {
         console.log('\n## 同一法人番号の重複（結合時に1:Nになる箇所）');
-        for (const [number, list] of duplicates.slice(0, 20)) {
+        for (const [number, list] of summary.duplicates.slice(0, 20)) {
             const detail = list
                 .map((r) => `${r.edinetCode}${r.secCode ? `/${r.secCode}` : ''} ${r.name}`)
                 .join(' , ');
             console.log(`- ${number}: ${detail}`);
         }
-        if (duplicates.length > 20) {
-            console.log(`- ...ほか ${duplicates.length - 20}組`);
+        if (summary.duplicates.length > 20) {
+            console.log(`- ...ほか ${summary.duplicates.length - 20}組`);
         }
     }
 
-    if (badCheckDigit.length > 0) {
+    if (summary.badCheckDigit.length > 0) {
         console.log('\n## 検査用数字が不正な値（要目視）');
-        for (const row of badCheckDigit.slice(0, 20)) {
-            console.log(`- ${row.corporateNumber} ${row.edinetCode} ${row.name}`);
+        for (const record of summary.badCheckDigit.slice(0, 20)) {
+            console.log(`- ${record.corporateNumber} ${record.edinetCode} ${record.name}`);
         }
     }
 
     if (outArg) {
         const outPath = outArg.slice('--out='.length);
         const lines = ['edinet_code,sec_code,corporate_number,listed,submitter_type,name'];
-        for (const row of rows) {
-            const name = `"${row.name.replaceAll('"', '""')}"`;
+        for (const record of records) {
             lines.push(
                 [
-                    row.edinetCode,
-                    row.secCode,
-                    row.corporateNumber,
-                    row.listed,
-                    row.submitterType,
-                    name,
+                    record.edinetCode,
+                    record.secCode ?? '',
+                    record.corporateNumber ?? '',
+                    record.listed ?? '',
+                    record.submitterType ?? '',
+                    `"${(record.name ?? '').replaceAll('"', '""')}"`,
                 ].join(',')
             );
         }
         writeFileSync(outPath, `${lines.join('\n')}\n`, 'utf8');
-        console.log(`\nマッピングを書き出しました: ${outPath} (${rows.length}行)`);
+        console.log(`\nマッピングを書き出しました: ${outPath} (${records.length}行)`);
     }
 
     if (sampleArg) {
-        await sampleGbiz(rows, Number.parseInt(sampleArg.slice('--gbiz-sample='.length), 10) || 20);
+        await sampleGbiz(
+            records,
+            Number.parseInt(sampleArg.slice('--gbiz-sample='.length), 10) || 20
+        );
     }
 }
 
