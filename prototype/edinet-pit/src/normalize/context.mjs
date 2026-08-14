@@ -24,13 +24,21 @@ const CONSOLIDATION = new Map([
 ]);
 
 /**
+ * Members that encode consolidation rather than a narrower slice. Parent-only
+ * figures are tagged NonConsolidatedMember in real filings, so treating every
+ * Member as a segment would silently discard all parent-only data -- which is
+ * exactly what happened until running the fixtures showed those rows missing.
+ */
+const CONSOLIDATION_MEMBERS = /(NonConsolidatedMember|ConsolidatedMember)/g;
+
+/**
  * Context IDs carrying a member axis describe a slice -- a segment, a forecast,
  * a subsidiary -- not the reporting entity's own figure. Prior periods and the
- * consolidated/non-consolidated axis are already conveyed by their own columns,
- * so any remaining Member suffix means "narrower than what we want".
+ * consolidation axis are already conveyed by their own columns, so any Member
+ * left after removing those means "narrower than what we want".
  */
 function hasMemberAxis(contextId) {
-    return /Member/.test(contextId);
+    return /Member/.test(String(contextId).replace(CONSOLIDATION_MEMBERS, ''));
 }
 
 function isForecast(contextId) {

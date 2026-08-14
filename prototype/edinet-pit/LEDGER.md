@@ -13,8 +13,8 @@
 - [x] **M0** CI解放 + 足場
 - [x] **M1** `schema.sql` + `store/db.mjs` + `store/facts.mjs` — バイテンポラルの核
 - [x] **M2** 正規化2層（mapping / fallback / context / units）
-- [ ] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs`
-- [ ] **M4** `query/financials.mjs` — **仮説の証明**（ここまで到達すれば目的達成）
+- [ ] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs` ← M4を先行させたため次はここ
+- [x] **M4** `query/financials.mjs` — **仮説の証明 → 達成**
 - [ ] **M5** `mcp/server.mjs`（余力分）
 - [ ] **M6** `gbiz/client.mjs` updateInfo差分（余力分）
 - [ ] **M7** 仕上げ・要約
@@ -109,6 +109,50 @@ CIは18/20/22のマトリクスを回す。
   タクソノミ年次改訂は「skipped の急増」として現れる。これが無いと毎年静かに
   取得量が減っていくだけになる
 - **欠損と0を絶対に混同しない。** 空欄・`-`・`－` は null
+
+### M4 — 仮説の証明（達成）★
+
+**M3より先に実施した。** M4はM1+M2だけで組めてM3に依存せず、
+核心の結果を早く確保するほうが安全と判断した。
+
+- `query/financials.mjs`: `getFinancials()` / `getRestatements()` / `toDelimited()`
+- `query/demo.mjs`: フィクスチャを読み込んで仮説を実演するCLI
+- `fixtures/edinet/filings.json`: 原本(2024-06-20) → 訂正(2024-11-05) → 翌期(2025-06-24)
+- `test/financials.test.mjs` を追加し、合計57件緑
+
+**実行結果（`node prototype/edinet-pit/src/query/demo.mjs`）**
+
+```
+# FY2023 net_sales as of 2024-08-01Z
+E99999,2023,net_sales,45000000000,jp_gaap,1,S100ORIG   ← 当時知り得た値。later_restated=1
+# FY2023 net_sales as of 2025-01-01Z
+E99999,2023,net_sales,44100000000,jp_gaap,0,S100AMND   ← 訂正後
+
+# restatement events
+  2024-11-05Z FY2023 net_sales:   45000000000 -> 44100000000 (-900000000 JPY) S100ORIG -> S100AMND
+  2024-11-05Z FY2023 total_assets: 80000000000 -> 79200000000 (-800000000 JPY) S100ORIG -> S100AMND
+```
+
+同じクエリが時点によって違う値を返し、訂正差分が出る。**目的達成。**
+再提出されただけの `operating_income` はイベントを生まない。
+翌期の比較年度（訂正後と同値）も追加イベントにならない。
+
+**`later_restated` フラグ**: 過去時点の値を返すとき「これは後に訂正された」を
+明示する。バックテストで無効化された数値を黙って渡さないため。
+PITストアの存在理由そのものなので、値と同格の一級情報として返す。
+
+**デモ実行で見つかった実バグ（重要）**
+
+`S100ORIG` が5行中3ファクトしか生成せず、**個別（単体）の行が全て落ちていた**。
+実データのEDINET CSVは個別値のcontextIDに `NonConsolidatedMember` を含むが、
+Member軸判定がこれをセグメントとして捨てていた。M2のテストは
+プレーンなcontextIDで書いていたため検出できなかった。
+→ 連結軸のMember（`NonConsolidatedMember` / `ConsolidatedMember`）を除去した後に
+残るMemberだけをセグメントと判定するよう修正。回帰テスト2件追加。
+`NonConsolidatedMember_AutoMember` のような重ね合わせは引き続き拒否する。
+
+**教訓**: 合成フィクスチャでも「実データの形」に寄せないと、
+テストが通っているのに実データで壊れる。M3のフィクスチャは実CSV形式で作る。
 
 ---
 

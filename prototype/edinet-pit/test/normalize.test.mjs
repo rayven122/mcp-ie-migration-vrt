@@ -87,6 +87,34 @@ describe('context selection', () => {
         });
     });
 
+    // Real filings tag parent-only figures with NonConsolidatedMember. Treating
+    // every Member as a segment discarded all parent-only data.
+    test('the consolidation axis member is not mistaken for a segment', () => {
+        assert.deepEqual(
+            selectContext(
+                row('x', '1', {
+                    contextId: 'CurrentYearDuration_NonConsolidatedMember',
+                    consolidatedLabel: '個別',
+                })
+            ),
+            { yearOffset: 0, consolidated: false }
+        );
+        assert.deepEqual(
+            selectContext(row('x', '1', { contextId: 'CurrentYearDuration_ConsolidatedMember' })),
+            { yearOffset: 0, consolidated: true }
+        );
+    });
+
+    // ...but a segment sitting on top of the consolidation axis is still a segment.
+    test('a segment combined with the consolidation axis is still rejected', () => {
+        assert.equal(
+            selectContext(
+                row('x', '1', { contextId: 'CurrentYearDuration_NonConsolidatedMember_AutoMember' })
+            ),
+            null
+        );
+    });
+
     // Segment rows report the same element with a smaller scope. Taking one as the
     // company figure is the quiet failure this whole module exists to prevent.
     test('segment rows are rejected', () => {
