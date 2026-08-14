@@ -320,6 +320,47 @@ M0〜M7 完了 + 計画外の M7a（通しの取り込み経路）。
 - `test/raw-store.test.mjs` 14件。**再正規化中の transport 呼び出し回数が0**であることを
   assert（これがレイクを持つ理由そのもの）。合計164件緑
 
+### 増分3 — 企業マスタと上場廃止追跡
+
+`upsertCompany` はテストからしか呼ばれず、`companies` は本番経路で空だった。
+そのため `getGroupCorporateNumbers` は親の法人番号を拾えず**静かにグループを縮めていた**。
+サーバイバル・バイアス対応もスキーマに列があるだけだった。
+
+- `edinet/companies.mjs`: `loadCompanyMaster` / `reconcileDelistings` / `getUniverse`。
+  **新規パーサは書かず**、既存 `parseCodeList` と `upsertCompany` を繋ぐだけ
+- `schema.sql` に `company_snapshots`（観測時点ごとの上場状態）
+- `codelist.mjs` に `readCodeListFile` / `fetchCodeList` を移設。
+  CLIとカバレッジスクリプトで共有（**また重複実装を避けた**）。
+  スクリプトの出力が従来と完全一致することを確認
+- CLI に `companies` / `universe`
+- `test/companies.test.mjs` 12件。合計176件緑
+
+**上場廃止の2つの形**
+
+一覧から消える場合と、**提出者としては残るが証券コードが消える**場合。
+後者はMBOの見え方で、企業が消えていないので見落としやすい。両方を検出する。
+
+**正直な限界（設計に明記）**
+
+EDINETのコード一覧は**現在のスナップショットのみ**で過去分は配布されない。
+したがって上場廃止は**今後観測する分しか積み上がらない**し、
+記録できる日付は実際の廃止日ではなく**気づいた観測日**である。
+`delisted_at` は `COALESCE` で最初の観測を保持し、再実行で日付が前に進まないようにした。
+
+**実測（CLI）**
+
+```
+1回目 (2026-08-01): companies written: 8, listed: 3
+                    no earlier snapshot to compare against; history starts here
+2回目 (2026-09-01): compared to 2026-08-01: 1 newly delisted
+                      E01777  absent_from_code_list
+universe:             8 companies   ← 廃止企業を保持（サーバイバル・バイアス無し）
+universe --listed-only: 2 companies
+```
+
+`getUniverse` は**既定で廃止企業を含む**。`listedOnly` を明示的に選ばせるのは、
+現存企業だけに絞るのが「収益性を過大評価する」まさにその間違いだから。
+
 ---
 
 ## 設計上の決定

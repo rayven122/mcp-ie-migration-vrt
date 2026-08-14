@@ -81,6 +81,23 @@ CREATE INDEX IF NOT EXISTS facts_as_of
 
 CREATE INDEX IF NOT EXISTS facts_source ON facts (source_doc_id);
 
+-- What the code list said at each time we looked.
+--
+-- EDINET publishes only the current list, with no archive of past ones, so
+-- listing history cannot be reconstructed backwards -- it can only accumulate
+-- from the first observation onward. Keeping each snapshot is what makes the next
+-- comparison, and therefore delisting detection, possible at all.
+CREATE TABLE IF NOT EXISTS company_snapshots (
+    observed_at   TEXT NOT NULL,
+    edinet_code   TEXT NOT NULL,
+    sec_code      TEXT,
+    listed        INTEGER NOT NULL,
+
+    PRIMARY KEY (observed_at, edinet_code)
+);
+
+CREATE INDEX IF NOT EXISTS company_snapshots_code ON company_snapshots (edinet_code);
+
 -- Consolidated scope, needed because EDINET files under the parent while
 -- gBizINFO records subsidies, procurement and patents under subsidiary names.
 -- Membership changes over time, so the rows are period-scoped.

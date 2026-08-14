@@ -17,6 +17,8 @@
  */
 
 import { createEdinetClient, isFinancialFiling } from './edinet/client.mjs';
+import { parseCodeList, readCodeListFile } from './edinet/codelist.mjs';
+import { getUniverse, loadCompanyMaster, reconcileDelistings } from './edinet/companies.mjs';
 import { ingestRange, renormalize, summarizeIngest } from './ingest.mjs';
 import { getFinancials, getRestatements, toDelimited } from './query/financials.mjs';
 import { openDatabase } from './store/db.mjs';
@@ -41,6 +43,8 @@ function usage() {
         [
             'usage:',
             '  backfill --from=YYYY-MM-DD --to=YYYY-MM-DD [--db=path] [--quiet]',
+            '  companies <Edinetcode.zip|EdinetcodeDlInfo.csv> [--db=path] [--observed-at=YYYY-MM-DD]',
+            '  universe [--db=path] [--listed-only] [--as-of=YYYY-MM-DD]',
             '  renormalize [--from=ISO] [--to=ISO] [--db=path] [--lake=path]',
             '  report --company=EDINETCODE [--field=net_sales] [--as-of=YYYY-MM-DD] [--db=path]',
             '  demo',
@@ -103,6 +107,70 @@ async function backfill(args) {
         }
     }
 
+    db.close();
+}
+
+/**
+ * Loads the company master from a code list and dates any delistings.
+ *
+ * Run this on a schedule. EDINET publishes only the current list, so listing
+ * history accumulates from the first time you look -- a company that leaves
+ * between two runs can only be dated to the run that noticed.
+ */
+function companiesCommand(args) {
+    const path = args._[1];
+    if (!path) {
+        usage();
+        process.exit(2);
+    }
+
+    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const observedAt =
+        typeof args['observed-at'] === 'string'
+            ? args['observed-at']
+            : new Date().toISOString().slice(0, 10);
+
+    const records = parseCodeList(readCodeListFile(path));
+    const { written } = loadCompanyMaster(db, records, { observedAt });
+    const { delisted, comparedTo } = reconcileDelistings(db, records, { observedAt });
+
+    console.log(`observed_at: ${observedAt}`);
+    console.log(`companies written: ${written}`);
+    console.log(`listed: ${records.filter((record) => record.isListed).length}`);
+
+    if (comparedTo === null) {
+        console.log('no earlier snapshot to compare against; history starts here');
+    } else {
+        console.log(`compared to ${comparedTo}: ${delisted.length} newly delisted`);
+        for (const entry of delisted.slice(0, 20)) {
+            console.log(`  ${entry.edinetCode}  ${entry.reason}`);
+        }
+    }
+
+    db.close();
+}
+
+/** The survivorship-free universe, or a point-in-time slice of it. */
+function universeCommand(args) {
+    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const rows = getUniverse(db, {
+        listedOnly: args['listed-only'] === true,
+        asOf: typeof args['as-of'] === 'string' ? args['as-of'] : undefined,
+    });
+
+    console.log('edinet_code,sec_code,corporate_number,listing_status,delisted_at');
+    for (const row of rows) {
+        console.log(
+            [
+                row.edinet_code,
+                row.sec_code ?? '',
+                row.corporate_number ?? '',
+                row.listing_status,
+                row.delisted_at ?? '',
+            ].join(',')
+        );
+    }
+    console.log(`\n${rows.length} companies`);
     db.close();
 }
 
@@ -179,6 +247,10 @@ async function main() {
 
     if (command === 'backfill') {
         await backfill(args);
+    } else if (command === 'companies') {
+        companiesCommand(args);
+    } else if (command === 'universe') {
+        universeCommand(args);
     } else if (command === 'renormalize') {
         renormalizeCommand(args);
     } else if (command === 'report') {

@@ -23,43 +23,15 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 // パーサと検査用数字はプロトタイプ側のモジュールが正。ここで再実装しない。
 import {
+    fetchCodeList,
     parseCodeList,
+    readCodeListFile,
     summarizeCorporateNumbers,
 } from '../../../prototype/edinet-pit/src/edinet/codelist.mjs';
 
 const CODELIST_URL =
     'https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip';
 const GBIZ_BASE = 'https://api.info.gbiz.go.jp/hojin/v2/hojin';
-
-function fetchCodeListZip() {
-    process.stderr.write(`fetching ${CODELIST_URL}\n`);
-    return execFileSync('curl', ['-sSL', '--max-time', '120', CODELIST_URL], {
-        maxBuffer: 256 * 1024 * 1024,
-        encoding: 'buffer',
-    });
-}
-
-/** zip/csv/未指定を受け取り、CP932としてデコードした本文を返す。 */
-function loadCsvText(inputPath, shouldFetch) {
-    let bytes;
-    if (shouldFetch) {
-        const tmp = '/tmp/Edinetcode.zip';
-        writeFileSync(tmp, fetchCodeListZip());
-        bytes = execFileSync('unzip', ['-p', tmp, '*EdinetcodeDlInfo.csv'], {
-            maxBuffer: 256 * 1024 * 1024,
-            encoding: 'buffer',
-        });
-    } else if (inputPath.endsWith('.zip')) {
-        bytes = execFileSync('unzip', ['-p', inputPath, '*EdinetcodeDlInfo.csv'], {
-            maxBuffer: 256 * 1024 * 1024,
-            encoding: 'buffer',
-        });
-    } else {
-        bytes = readFileSync(inputPath);
-    }
-    // EDINETの配布CSVはCP932。UTF-8として読むと列名が壊れて突合できない。
-    return new TextDecoder('shift_jis').decode(bytes);
-}
 
 function pct(numerator, denominator) {
     if (denominator === 0) {
@@ -142,7 +114,7 @@ async function main() {
         process.exit(2);
     }
 
-    const records = parseCodeList(loadCsvText(inputPath, shouldFetch));
+    const records = parseCodeList(shouldFetch ? fetchCodeList() : readCodeListFile(inputPath));
     const summary = summarizeCorporateNumbers(records);
 
     console.log('# EDINETコード一覧 法人番号 充足率レポート');

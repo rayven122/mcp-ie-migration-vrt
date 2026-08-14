@@ -12,6 +12,39 @@
  * carrying a second copy of this logic.
  */
 
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+
+export const CODELIST_URL =
+    'https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip';
+
+/**
+ * Reads the distributed code list, accepting either the zip or the CSV inside it.
+ *
+ * The file is CP932. Read as UTF-8 it does not fail -- the column names come out
+ * mangled, the header lookup misses, and the whole list silently yields nothing.
+ */
+export function readCodeListFile(path) {
+    const bytes = path.endsWith('.zip')
+        ? execFileSync('unzip', ['-p', path, '*EdinetcodeDlInfo.csv'], {
+              maxBuffer: 256 * 1024 * 1024,
+              encoding: 'buffer',
+          })
+        : readFileSync(path);
+
+    return new TextDecoder('shift_jis').decode(bytes);
+}
+
+/** Downloads the current code list and returns its decoded text. */
+export function fetchCodeList({ tmpPath = '/tmp/Edinetcode.zip' } = {}) {
+    const zip = execFileSync('curl', ['-sSL', '--max-time', '120', CODELIST_URL], {
+        maxBuffer: 256 * 1024 * 1024,
+        encoding: 'buffer',
+    });
+    writeFileSync(tmpPath, zip);
+    return readCodeListFile(tmpPath);
+}
+
 /** RFC 4180-ish parser. Addresses in this file contain commas and quotes. */
 export function parseCsv(text) {
     const rows = [];
