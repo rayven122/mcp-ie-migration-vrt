@@ -46,7 +46,7 @@ export function loadFixtures(db, { filings } = JSON.parse(readFileSync(fixturePa
     return report;
 }
 
-function main() {
+export function runDemo() {
     const db = openDatabase(':memory:');
     const ingested = loadFixtures(db);
 
@@ -89,5 +89,5 @@ function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    main();
+    runDemo();
 }
