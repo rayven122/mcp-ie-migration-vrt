@@ -81,6 +81,22 @@ CREATE INDEX IF NOT EXISTS facts_as_of
 
 CREATE INDEX IF NOT EXISTS facts_source ON facts (source_doc_id);
 
+-- Which dates have already been ingested.
+--
+-- A ten-year backfill is a few thousand listing requests plus a document
+-- download each, so it will be interrupted -- by a network failure, a restart, or
+-- someone stopping it. Without this table a restart begins again from the start
+-- date and re-downloads everything already held. The day is the resume
+-- granularity because a day is what the listing endpoint returns.
+CREATE TABLE IF NOT EXISTS ingest_progress (
+    date          TEXT PRIMARY KEY,
+    status        TEXT NOT NULL,     -- completed / partial
+    documents     INTEGER NOT NULL,
+    facts         INTEGER NOT NULL,
+    failed        INTEGER NOT NULL,
+    completed_at  TEXT NOT NULL
+);
+
 -- What the code list said at each time we looked.
 --
 -- EDINET publishes only the current list, with no archive of past ones, so

@@ -352,3 +352,112 @@ describe('the whole path, from document bytes to a point-in-time read', () => {
         assert.deepEqual(summary.topUnmapped, []);
     });
 });
+
+describe('resumable backfill', () => {
+    let db;
+
+    beforeEach(() => {
+        db = openDatabase(':memory:');
+    });
+
+    async function drain(client, options) {
+        const days = [];
+        for await (const day of ingestRange(db, client, options)) {
+            days.push(day);
+        }
+        return days;
+    }
+
+    test('a finished day is recorded', async () => {
+        const { client } = fixtureClient();
+        await drain(client, { from: '2024-06-20', to: '2024-06-20' });
+
+        const [row] = db.all('SELECT date, status, documents, facts FROM ingest_progress');
+        assert.equal(row.date, '2024-06-20');
+        assert.equal(row.status, 'completed');
+        assert.equal(row.documents, 1);
+        assert.ok(row.facts > 0);
+    });
+
+    // A ten-year backfill will be interrupted. Starting over would re-download
+    // everything already held, against a public service.
+    test('a second run skips days already completed', async () => {
+        const first = fixtureClient();
+        await drain(first.client, { from: '2024-06-20', to: '2024-06-20' });
+        assert.ok(first.fetched.length > 0);
+
+        const second = fixtureClient();
+        const days = await drain(second.client, { from: '2024-06-20', to: '2024-06-20' });
+
+        assert.deepEqual(
+            days.map((day) => day.skipped),
+            [true]
+        );
+        assert.equal(second.fetched.length, 0, 'a completed day must not be downloaded again');
+    });
+
+    test('resuming continues from where it stopped and completes the range', async () => {
+        const first = fixtureClient();
+        await drain(first.client, { from: '2024-06-20', to: '2024-06-20' });
+
+        const second = fixtureClient();
+        const days = await drain(second.client, { from: '2024-06-20', to: '2024-11-05' });
+
+        assert.equal(days.length, 139);
+        assert.equal(days[0].skipped, true, 'the already-finished day is skipped');
+        assert.equal(
+            days.filter((day) => day.results.some((result) => result.facts > 0)).length,
+            1,
+            'the amendment day is still ingested'
+        );
+        assert.ok(second.fetched.includes('S100AMND'));
+        assert.ok(!second.fetched.includes('S100ORIG'));
+    });
+
+    // A day that had failures is not finished: a retry has to try it again rather
+    // than accept a partial result as the whole day.
+    test('a day with failures is marked partial and retried', async () => {
+        const broken = fixtureClient({ broken: new Set(['S100AMND']) });
+        await drain(broken.client, { from: '2024-11-05', to: '2024-11-05' });
+
+        const [row] = db.all('SELECT status, failed FROM ingest_progress');
+        assert.equal(row.status, 'partial');
+        assert.equal(row.failed, 1);
+
+        const retry = fixtureClient();
+        const days = await drain(retry.client, { from: '2024-11-05', to: '2024-11-05' });
+
+        assert.equal(days[0].skipped, false, 'a partial day must be attempted again');
+        assert.ok(retry.fetched.includes('S100AMND'));
+    });
+
+    test('force re-ingests completed days, idempotently', async () => {
+        const first = fixtureClient();
+        await drain(first.client, { from: '2024-06-20', to: '2024-11-05' });
+        const before = getFinancials(db, { companyIds: ['E99999'] });
+
+        const forced = fixtureClient();
+        const days = await drain(forced.client, {
+            from: '2024-06-20',
+            to: '2024-11-05',
+            force: true,
+        });
+
+        assert.ok(days.every((day) => day.skipped === false));
+        assert.ok(forced.fetched.includes('S100ORIG'));
+        assert.deepEqual(getFinancials(db, { companyIds: ['E99999'] }), before);
+    });
+
+    test('the summary counts skipped days separately', async () => {
+        const first = fixtureClient();
+        await drain(first.client, { from: '2024-06-20', to: '2024-06-20' });
+
+        const second = fixtureClient();
+        const summary = summarizeIngest(
+            await drain(second.client, { from: '2024-06-20', to: '2024-06-21' })
+        );
+
+        assert.equal(summary.days, 2);
+        assert.equal(summary.skippedDays, 1);
+    });
+});

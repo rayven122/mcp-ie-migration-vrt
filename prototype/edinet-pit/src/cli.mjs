@@ -42,7 +42,8 @@ function usage() {
     console.error(
         [
             'usage:',
-            '  backfill --from=YYYY-MM-DD --to=YYYY-MM-DD [--db=path] [--quiet]',
+            '  backfill --from=YYYY-MM-DD --to=YYYY-MM-DD [--db=path] [--lake=path]',
+            '           [--force] [--quiet]      days already completed are skipped',
             '  companies <Edinetcode.zip|EdinetcodeDlInfo.csv> [--db=path] [--observed-at=YYYY-MM-DD]',
             '  universe [--db=path] [--listed-only] [--as-of=YYYY-MM-DD]',
             '  renormalize [--from=ISO] [--to=ISO] [--db=path] [--lake=path]',
@@ -77,16 +78,17 @@ async function backfill(args) {
         to: args.to,
         filter: isFinancialFiling,
         rawStore,
+        force: args.force === true,
     })) {
         days.push(day);
-        if (!args.quiet) {
+        if (!args.quiet && !day.skipped) {
             const facts = day.results.reduce((total, result) => total + (result.facts ?? 0), 0);
             console.error(`${day.date}  ${day.results.length} documents, ${facts} facts`);
         }
     }
 
     const summary = summarizeIngest(days);
-    console.log(`\ndays: ${summary.days}`);
+    console.log(`\ndays: ${summary.days} (skipped as already done: ${summary.skippedDays})`);
     console.log(
         `documents: ${summary.documents} (failed ${summary.failed}, skipped ${summary.skippedDocuments})`
     );

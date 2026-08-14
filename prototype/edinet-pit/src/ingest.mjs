@@ -10,7 +10,7 @@
  * whole path run against fixtures with no network.
  */
 
-import { DOC_TYPE, isFinancialFiling } from './edinet/client.mjs';
+import { DOC_TYPE, eachDate, isFinancialFiling } from './edinet/client.mjs';
 import { decodeDocumentBytes, parseDocumentCsv } from './edinet/csv.mjs';
 import { detectAccountingBasis, normalizeFiling } from './normalize/index.mjs';
 import { recordDocument, recordFacts } from './store/facts.mjs';
@@ -144,17 +144,68 @@ export function renormalize(db, rawStore, options = {}) {
     return results;
 }
 
+/** Dates already ingested, so a resumed run can skip them. */
+export function completedDates(db) {
+    return new Set(
+        db.all("SELECT date FROM ingest_progress WHERE status = 'completed'").map((row) => row.date)
+    );
+}
+
+function recordProgress(db, date, results) {
+    const facts = results.reduce((total, result) => total + (result.facts ?? 0), 0);
+    const failed = results.filter((result) => result.error).length;
+
+    db.run(
+        `INSERT INTO ingest_progress (date, status, documents, facts, failed, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (date) DO UPDATE SET
+            status = excluded.status,
+            documents = excluded.documents,
+            facts = excluded.facts,
+            failed = excluded.failed,
+            completed_at = excluded.completed_at`,
+        date,
+        // A day with failures is not finished: resuming should try it again rather
+        // than treating a partial result as the whole day.
+        failed === 0 ? 'completed' : 'partial',
+        results.length,
+        facts,
+        failed,
+        new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+    );
+}
+
 /**
  * Walks a date range and ingests the periodic financial filings it finds.
  *
- * A generator so a ten-year backfill can be interrupted and resumed, and so a
- * single unreadable document does not discard a day's work: failures are reported
- * per document and the walk continues.
+ * Each finished day is recorded, and days already completed are skipped on a
+ * later run: a ten-year backfill will be interrupted, and starting over would
+ * mean re-downloading everything already held. A day that had failures is marked
+ * partial rather than completed, so a retry picks it up again.
+ *
+ * A generator so the caller can persist as it goes and stop early, and so one
+ * unreadable document does not discard a day: failures are reported per document
+ * and the walk continues.
  */
 export async function* ingestRange(db, client, options) {
-    const { from, to, filter = isFinancialFiling, docType = DOC_TYPE.CSV, rawStore } = options;
+    const {
+        from,
+        to,
+        filter = isFinancialFiling,
+        docType = DOC_TYPE.CSV,
+        rawStore,
+        force = false,
+    } = options;
 
-    for await (const { date, documents } of client.walkDates(from, to, filter)) {
+    const alreadyDone = force ? new Set() : completedDates(db);
+
+    for (const date of eachDate(from, to)) {
+        if (alreadyDone.has(date)) {
+            yield { date, skipped: true, results: [] };
+            continue;
+        }
+
+        const documents = (await client.listDocuments(date)).filter(filter);
         const results = [];
 
         for (const document of documents) {
@@ -169,7 +220,8 @@ export async function* ingestRange(db, client, options) {
             }
         }
 
-        yield { date, results };
+        recordProgress(db, date, results);
+        yield { date, skipped: false, results };
     }
 }
 
@@ -177,6 +229,7 @@ export async function* ingestRange(db, client, options) {
 export function summarizeIngest(days) {
     const summary = {
         days: days.length,
+        skippedDays: days.filter((day) => day.skipped).length,
         documents: 0,
         facts: 0,
         failed: 0,

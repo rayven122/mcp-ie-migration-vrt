@@ -361,6 +361,37 @@ universe --listed-only: 2 companies
 `getUniverse` は**既定で廃止企業を含む**。`listedOnly` を明示的に選ばせるのは、
 現存企業だけに絞るのが「収益性を過大評価する」まさにその間違いだから。
 
+### 増分4 — 再開可能なバックフィル
+
+`ingestRange` のdocstringは「中断・再開できる」と書いていたが**永続化された進捗が無く**、
+再実行すると `from` から全部やり直していた。コメントが実態と食い違っていた。
+
+- `schema.sql` に `ingest_progress`（日付PK / status / documents / facts / failed / completed_at）
+- `ingestRange` は完了済みの日付を既定でスキップし、`force: true` で再取り込み
+- **失敗があった日は `completed` ではなく `partial`** として記録。
+  部分結果を1日分として扱わず、再試行で拾い直す
+- `summarizeIngest` に `skippedDays`
+- CLI に `--force`
+- `test/ingest.test.mjs` に6件追加。合計182件緑
+
+**検証の要点**: 再実行時に**完了済みの日の書類がダウンロードされないこと**を
+transport の取得履歴で assert している（`S100ORIG` が含まれず `S100AMND` が含まれる）。
+`force` での再取り込みが冪等（ファクトが変わらない）ことも確認。
+
+---
+
+## 増分の総括（4件すべて完了）
+
+| # | 内容 | 実測結果 |
+|---|---|---|
+| 1 | NULバイト除去 | `git diff` が `- -` → 194行/260行。**PRでレビュー可能に** |
+| 2 | 生データレイク | 再正規化中の transport 呼び出し回数 **0** |
+| 3 | 企業マスタ・上場廃止 | 廃止1件を検出、universe 8社 vs 現存2社 |
+| 4 | 再開可能バックフィル | 完了済み日は再取得されない |
+
+テスト148件 → **182件**。`npm run check` / `audit` / `pack:dry-run` 通過。
+仮説（as_of で値が変わる）は全増分を通じて無傷。
+
 ---
 
 ## 設計上の決定
