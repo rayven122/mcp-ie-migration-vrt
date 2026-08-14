@@ -1,13 +1,27 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const tests = readdirSync('test')
-    .filter((name) => name.endsWith('.test.mjs') && name !== 'all.test.mjs')
-    .sort();
+/** Test directories to run. Prototypes keep their suites beside their own source. */
+const suites = ['test'];
 
-for (const test of tests) {
-    execFileSync(process.execPath, ['--test', join('test', test)], {
-        stdio: 'inherit',
-    });
+if (existsSync('prototype')) {
+    for (const name of readdirSync('prototype').sort()) {
+        const dir = join('prototype', name, 'test');
+        if (existsSync(dir)) {
+            suites.push(dir);
+        }
+    }
+}
+
+for (const suite of suites) {
+    const tests = readdirSync(suite)
+        .filter((name) => name.endsWith('.test.mjs') && name !== 'all.test.mjs')
+        .sort();
+
+    for (const test of tests) {
+        execFileSync(process.execPath, ['--test', join(suite, test)], {
+            stdio: 'inherit',
+        });
+    }
 }
