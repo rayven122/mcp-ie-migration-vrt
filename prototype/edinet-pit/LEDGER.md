@@ -11,7 +11,7 @@
 ## マイルストーン
 
 - [x] **M0** CI解放 + 足場
-- [ ] **M1** `schema.sql` + `store/db.mjs` + `store/facts.mjs` — バイテンポラルの核
+- [x] **M1** `schema.sql` + `store/db.mjs` + `store/facts.mjs` — バイテンポラルの核
 - [ ] **M2** 正規化2層（mapping / fallback / context / units）
 - [ ] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs`
 - [ ] **M4** `query/financials.mjs` — **仮説の証明**（ここまで到達すれば目的達成）
@@ -45,10 +45,41 @@
 - SQLite の三値論理は期待どおりで、`known_until IS NULL` を開区間として扱えることを確認。
   訂正の境界時刻は半開区間 `[known_from, known_until)` で新しい行に切り替わる
 
-**注意（次サイクルで確認すること）**: `quality` が長期間落ちていたため
-`test` / `coverage` ジョブは実際には走っていなかった。green化により、既存の
-`test/` 配下（`browser-compat` / `safari` を含む）が別の理由で落ちる可能性がある。
-その場合は既存テストの問題であり、プロトタイプとは切り分けて報告する。
+**M0の結果（CI実測）**: `quality` は green になり `coverage` も走った
+（Lines 82.06% / Branches 71.36% / Functions 89.58%）。既存 `test/` 配下は
+Node 18/20 でも通っており、問題なかった。
+
+### M1 — バイテンポラルの核
+
+- `schema.sql`: `companies` / `documents` / `facts` / `company_group` / `gbiz_facts`。
+  Postgres移行を見据え `rowid`・`AUTOINCREMENT` 等のSQLite固有要素を使わない
+- `store/db.mjs`: スキーマ適用、行を通常オブジェクトへ正規化、トランザクション
+- `store/facts.mjs`: `recordDocument` / `recordFacts` / `getFactsAsOf` / `getFactHistory`
+- `test/facts.test.mjs` 15件緑
+
+**設計の要点 — reseal 方式**
+
+各ファクトは `known_from` のみ付けて挿入し、その後シリーズ全体を
+`resealSeries()` で再封する（`known_until` = 次行の `known_from`、最終行は NULL）。
+reseal は「今ある行の純関数」なので、
+
+- **取り込み順に依存しない** — バックフィルは提出順に来ない。2015年の書類が
+  2024年の後に届いても同じタイムラインに収束する
+- **冪等** — 同じ書類を再投入しても結果が変わらない
+
+連続する同一値（value・unit・accounting_basis が一致）は最古の行に畳む。
+訂正報告書は一部だけを訂正し残りは同じ値で再提出するため、畳まないと
+**存在しない訂正イベントを捏造してしまう**。畳んだ結果残る `known_from` が
+「その値が最初に知り得た時刻」になる。
+
+**M0で入れた回帰とその修正（重要）**
+
+`run-tests.js` に `prototype/*/test` を足したことで **Node 18/20 の `test` ジョブを
+壊した**。`node:sqlite` は Node 22 以降にしか存在せず（Node 20 実機で
+`ERR_UNKNOWN_BUILTIN_MODULE` を確認）、パッケージは `engines: node >=18` で
+CIは18/20/22のマトリクスを回す。
+→ `run-tests.js` に Node major >= 22 のゲートを追加し、それ未満ではスキップ。
+既存 `test/` 配下の探索挙動は変えていない。
 
 ---
 

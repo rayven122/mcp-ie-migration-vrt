@@ -51,6 +51,10 @@ as_of('2025-01-01') → FY2023の売上高 = 訂正後の値
 
 ## 実行
 
+**Node 22以降が必要**（ストアが `node:sqlite` を使う）。
+パッケージ本体は Node 18 以降を対象にしているため、`npm test` は
+Node 22 未満ではプロトタイプのテストをスキップする。
+
 ```bash
 # テスト（ブラウザ・ネットワーク不要）
 node --test prototype/edinet-pit/test/*.test.mjs
