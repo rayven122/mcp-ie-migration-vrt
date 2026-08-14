@@ -13,6 +13,8 @@
  * which is the only way they get tested at all in a sandbox that cannot reach it.
  */
 
+import { buildUrl, createPacedRequester, HttpRequestError } from '../http/paced-requester.mjs';
+
 const BASE_URL = 'https://api.edinet-fsa.go.jp/api/v2';
 
 /** Metadata only, or metadata plus the document list. */
@@ -21,16 +23,8 @@ export const LIST_TYPE = { METADATA: 1, WITH_DOCUMENTS: 2 };
 /** Document formats. CSV arrived in 2024 and is far cheaper to parse than XBRL. */
 export const DOC_TYPE = { XBRL_ZIP: 1, PDF: 2, ALTERNATE: 3, ENGLISH: 4, CSV: 5 };
 
-export class EdinetError extends Error {
-    constructor(message, { status, retryable } = {}) {
-        super(message);
-        this.name = 'EdinetError';
-        this.status = status;
-        this.retryable = retryable === true;
-    }
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Kept for callers that catch by name; the shared requester raises these. */
+export const EdinetError = HttpRequestError;
 
 /**
  * @param {object} options
@@ -41,100 +35,30 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {Function} [options.wait]         Delay implementation; injected so tests do not sleep.
  */
 export function createEdinetClient(options) {
-    const {
-        subscriptionKey,
-        transport = globalThis.fetch,
-        minIntervalMs = 250,
-        maxRetries = 3,
-        wait = sleep,
-        baseUrl = BASE_URL,
-    } = options;
+    const { subscriptionKey, baseUrl = BASE_URL, ...requesterOptions } = options;
 
     if (!subscriptionKey) {
-        throw new EdinetError('subscriptionKey is required');
+        throw new HttpRequestError('subscriptionKey is required');
     }
 
-    let lastRequestAt = 0;
-    const stats = { requests: 0, retries: 0, waitedMs: 0 };
+    const { request, stats } = createPacedRequester(requesterOptions);
 
-    async function pace() {
-        const elapsed = Date.now() - lastRequestAt;
-        const remaining = minIntervalMs - elapsed;
-        if (lastRequestAt !== 0 && remaining > 0) {
-            stats.waitedMs += remaining;
-            await wait(remaining);
-        }
-        lastRequestAt = Date.now();
-    }
-
-    /**
-     * A 4xx means the request was wrong and repeating it will fail identically,
-     * so only 5xx, 429 and transport errors are retried. Retrying a 400 would
-     * just multiply load on a public service for nothing.
-     */
-    function classify(status) {
-        if (status === 429 || status >= 500) {
-            return { retryable: true };
-        }
-        return { retryable: false };
-    }
-
-    async function request(path, params, { asBuffer = false } = {}) {
-        const url = new URL(`${baseUrl}${path}`);
-        for (const [key, value] of Object.entries(params)) {
-            url.searchParams.set(key, String(value));
-        }
-        url.searchParams.set('Subscription-Key', subscriptionKey);
-
-        let lastError;
-        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-            if (attempt > 0) {
-                stats.retries += 1;
-                // Exponential backoff: 500ms, 1s, 2s.
-                await wait(500 * 2 ** (attempt - 1));
-            }
-            await pace();
-            stats.requests += 1;
-
-            let response;
-            try {
-                response = await transport(url.toString());
-            } catch (error) {
-                lastError = new EdinetError(`transport failure: ${error.message}`, {
-                    retryable: true,
-                });
-                continue;
-            }
-
-            if (response.ok) {
-                return asBuffer ? await response.arrayBuffer() : await response.json();
-            }
-
-            const { retryable } = classify(response.status);
-            lastError = new EdinetError(`EDINET responded ${response.status}`, {
-                status: response.status,
-                retryable,
-            });
-            if (!retryable) {
-                throw lastError;
-            }
-        }
-
-        throw lastError;
-    }
+    // The key rides in the query string, which is what EDINET expects.
+    const call = (path, params, opts) =>
+        request(buildUrl(baseUrl, path, { ...params, 'Subscription-Key': subscriptionKey }), opts);
 
     return {
         stats,
 
         /** Documents filed on one day (`YYYY-MM-DD`). */
         async listDocuments(date, type = LIST_TYPE.WITH_DOCUMENTS) {
-            const body = await request('/documents.json', { date, type });
+            const body = await call('documents.json', { date, type });
             return (body.results ?? []).map(toDocumentSummary);
         },
 
         /** Raw bytes of one document in the requested format. */
         async fetchDocument(docId, type = DOC_TYPE.CSV) {
-            return request(`/documents/${docId}`, { type }, { asBuffer: true });
+            return call(`documents/${docId}`, { type }, { as: 'buffer' });
         },
 
         /**
