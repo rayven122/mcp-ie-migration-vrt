@@ -562,20 +562,55 @@ EDINETコード ── 提出者法人番号(13桁) ── gBizINFO ── 証�
 
 なお同CSVには非上場の提出者も含まれるため、証券コードの有無で上場/非上場を判別できる。
 
-### 13.2 gBizINFO の仕様 [要検証: 公式仕様書で確認]
+### 13.2 gBizINFO REST API v2 の仕様 [確: Swagger UI（OAS 3.1）で確認]
 
 | 項目 | 内容 |
 |---|---|
 | 母集団 | 約400万法人（EDINETの4,600社と桁が3つ違う） |
 | 認証 | ヘッダ `X-hojinInfo-api-token`。Web API利用申請でトークン発行。**無料** |
-| v1 エンドポイント | `https://info.gbiz.go.jp/hojin/v1/hojin/{法人番号}` ほか（`api.info.gbiz.go.jp` でも可） |
-| バージョン | **2026年1月26日に新システムへリニューアルし v2 へ**。v2仕様書は暫定版が公開。v1も当面継続利用可 |
-| 別方式 | REST API のほかに **SPARQL API**（RDF）も提供 |
-| 制限 | リクエスト数に上限あり（要確認） |
-| データ区分 | 法人基本情報 / 補助金 / 届出認定 / 表彰 / 調達 / 特許 / 財務 / 職場情報 |
+| ベース | `https://api.info.gbiz.go.jp` + サーバパス `/hojin` + `/v2/hojin/...` |
+| 定義 | `/hojin/v3/api-docs/v2`（OAS 3.1） |
+| 制限 | リクエスト数に上限あり [要検証] |
+| 別方式 | SPARQL API（RDF）も提供 |
 
-実装方針: **v2 前提で書き、v1 をフォールバック**にする。移行期に当たるため、
-どちらか片方に固定しない。
+**個別取得（法人番号を指定）**
+
+```
+GET /v2/hojin                              法人検索
+GET /v2/hojin/{corporate_number}           法人基本情報
+GET /v2/hojin/{corporate_number}/certification  届出・認定情報
+GET /v2/hojin/{corporate_number}/commendation   表彰情報
+GET /v2/hojin/{corporate_number}/corporation    事業所情報   ← v1調査時に把握漏れ
+GET /v2/hojin/{corporate_number}/finance        財務情報
+GET /v2/hojin/{corporate_number}/patent         特許情報
+GET /v2/hojin/{corporate_number}/procurement    調達情報
+GET /v2/hojin/{corporate_number}/subsidy        補助金情報
+GET /v2/hojin/{corporate_number}/workplace      職場情報
+```
+
+**期間指定検索（Period-specified Search）★取り込み設計を変える**
+
+```
+GET /v2/hojin/updateInfo                   期間内に追加/更新された法人基本情報
+GET /v2/hojin/updateInfo/certification
+GET /v2/hojin/updateInfo/commendation
+GET /v2/hojin/updateInfo/corporation
+GET /v2/hojin/updateInfo/finance
+GET /v2/hojin/updateInfo/patent
+GET /v2/hojin/updateInfo/procurement
+GET /v2/hojin/updateInfo/subsidy
+GET /v2/hojin/updateInfo/workplace
+```
+
+**実装上の注意点 [確]**
+
+- **URL末尾にスラッシュを付けるとエラーになる。** クライアント側でパスを組む際に
+  正規化して末尾スラッシュを落とす処理を必ず入れる
+- パスが `/hojin/v2/hojin/{番号}` と `hojin` を2回含む。取り違えやすい
+- Swagger ページには動作確認用トークンが掲載されているが、
+  **「このページでの動作確認でのみ使用」と明記**されている。
+  プログラムからの取得には使わず、必ず利用申請で自分のトークンを取得する
+- v1 も当面併存するが、**v2 前提で実装**してよい（エンドポイント体系が確定している）
 
 ### 13.3 何が新しく分析できるか ★本題
 
@@ -670,21 +705,83 @@ gbiz_facts
 - **財務情報は EDINET を正とする。** gBizINFO の財務は粒度が粗いので、
   非上場企業（比較対象）用に限定して使う
 
-### 13.6 取り込み設計
+### 13.6 取り込み設計 — `updateInfo` が設計を変える ★
 
-- **400万法人を全件取る必要はない。** EDINET 4,600社 + その連結子会社に絞れば
-  数万法人で済み、リクエスト上限内に収まる
-- 日次で増分取得。補助金・調達は随時追加されるため、更新検知が必要
-- v2移行期のため、レスポンス差分を吸収するアダプタ層を1枚入れる
+当初は「対象法人 × 9カテゴリを日次ポーリング」を想定していたが、
+v2 に **期間指定の更新差分エンドポイント（`/v2/hojin/updateInfo/*`）** があるため不要になる。
 
-### 13.7 法務 [要検証]
+| 方式 | 日次リクエスト数 | 評価 |
+|---|---|---|
+| 素朴: 対象法人 × 9カテゴリを毎日引く | 3万社 × 9 = **27万回/日** | リクエスト上限で破綻 |
+| **updateInfo で差分を取り、変化した法人番号だけ詳細取得** | **9回 + 変更分のみ** | 現実的 |
+
+推奨フロー:
+
+```
+1. 日次で /v2/hojin/updateInfo/{category} を期間指定で9本叩く
+2. 返ってきた法人番号を、自社の対象集合（EDINET 4,600社 + 連結子会社）と突合
+3. 交差した法人番号だけ /v2/hojin/{number}/{category} で詳細取得
+4. gbiz_facts に upsert（fetched_at と api_version を記録）
+```
+
+副産物として、**「いつ更新されたか」が取得側で分かる**。
+これは §7.2(A) のポイントインタイム設計と相性がよく、
+「補助金の採択がいつ公表されたか」を保持できる = 未来情報の混入を避けられる。
+
+補足:
+
+- **400万法人を全件取る必要はない。** 対象を EDINET 提出者 + 連結子会社に絞れば数万法人
+- 初回のみ全件バックフィルが必要。以降は差分だけ
+- レスポンス差分を吸収するアダプタ層を1枚入れる（v1併存期のため）
+
+### 13.7 法人番号の充足率を測るスクリプト
+
+結合可否は「`EdinetcodeDlInfo.csv` の提出者法人番号がどれだけ埋まっているか」で決まる。
+着手前に実測するためのスクリプトを同梱した。
+
+```
+docs/research/scripts/edinet-corporate-number-coverage.mjs
+```
+
+```bash
+# EDINETからコード一覧を取得して計測
+node docs/research/scripts/edinet-corporate-number-coverage.mjs --fetch
+
+# 手元のzip/csvから計測 + 結合用マッピングを書き出す
+node docs/research/scripts/edinet-corporate-number-coverage.mjs Edinetcode.zip --out=mapping.csv
+
+# gBizINFOに実照会して登録実在率も測る（自分のトークンが必要）
+GBIZ_API_TOKEN=xxxx node docs/research/scripts/edinet-corporate-number-coverage.mjs \
+    Edinetcode.zip --gbiz-sample=50
+```
+
+依存ゼロ（Node標準のみ）。計測内容:
+
+- 総提出者数 / 証券コードあり（上場相当）の件数
+- 法人番号の充足率 — **全体と「上場相当のみ」を分けて出す**
+- **提出者種別ごとの内訳** — 個人提出者・外国法人は法人番号を持たないのが正常なので、
+  全体の充足率だけ見ると過小評価になる。分母を分けないと判断を誤る
+- 13桁でない値、**検査用数字（チェックディジット）が不正な値**
+- **同一法人番号に複数EDINETコードが割り当たっている組** — 結合が 1:N になる箇所。
+  ここを知らずに join すると行が増える
+- `--out` で `edinet_code, sec_code, corporate_number, listed, submitter_type, name` を書き出し
+
+検査用数字は国税庁仕様（`9 - (Σ P_n × Q_n) mod 9`）で実装しており、
+トヨタ自動車の基礎番号から計算した結果が実際の法人番号 `1180301018771` と一致することを
+確認済み。CP932デコード・引用符付きフィールド・メタ行スキップは合成フィクスチャで検証済み。
+
+**注意**: この計測は本セッションの環境では実行できていない（ネットワークポリシーにより
+`disclosure2dl.edinet-fsa.go.jp` への到達が拒否される）。ロジックは合成データで検証済みだが、
+**実データでの数値はまだ取れていない**。
+
+### 13.8 法務 [要検証]
 
 - gBizINFO はオープンデータ（政府標準利用規約系と推測）。**利用規約の原文確認が必要**
 - 補助金・調達の受給実績は事実だが、企業にとってセンシティブに見えうる。
   **事実の再掲に留め、評価的な表現を加えない**
 - 代表者名などの個人情報の取り扱いに注意
 
-### 13.8 §12 の選択肢への影響
+### 13.9 §12 の選択肢への影響
 
 - **選択肢 B（金融で深く刺す）を明確に強化する。** 特に (A)官需エクスポージャーと
   (C)開示の裏取りは EDINET DB が現在持っていない
