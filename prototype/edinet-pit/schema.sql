@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS facts (
     source_doc_id     TEXT NOT NULL,
     source_element_id TEXT NOT NULL,
 
+    -- Which name-resolution layer produced this: 'layer1' matched a published
+    -- element ID, 'layer2' matched the element's name shape. A guess and a known
+    -- mapping must stay distinguishable, or consumers cannot tell how much to
+    -- trust a figure and coverage numbers become meaningless.
+    mapping_layer     TEXT NOT NULL DEFAULT 'layer1',
+
     -- Knowledge time, not valid time.
     known_from        TEXT NOT NULL,
     known_until       TEXT,             -- NULL means "still current"

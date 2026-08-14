@@ -1,0 +1,151 @@
+{
+    "_comment": [
+        "Layer 1 of the two-layer name resolution: known element IDs per accounting basis.",
+        "Order matters. The first candidate present in a document wins, so the list runs",
+        "from the most specific/preferred element to the more generic fallbacks. A filer",
+        "reporting both NetSales and OperatingRevenue1 should resolve to the former.",
+        "An entry may be an object with negate:true for elements whose reported sign is",
+        "opposite to the canonical field -- loss elements are reported positive."
+    ],
+
+    "net_sales": {
+        "jp_gaap": [
+            "jppfs_cor:NetSales",
+            "jppfs_cor:OperatingRevenue1",
+            "jppfs_cor:OperatingRevenue2",
+            "jppfs_cor:NetSalesOfCompletedConstructionContracts",
+            "jppfs_cor:GrossOperatingRevenue",
+            "jppfs_cor:TotalNetSales"
+        ],
+        "ifrs": [
+            "jpigp_cor:RevenueIFRS",
+            "jpigp_cor:NetSalesIFRS",
+            "jpigp_cor:SalesRevenuesIFRS",
+            "jpigp_cor:TotalRevenuesIFRS"
+        ],
+        "us_gaap": ["jpigp_cor:RevenuesUS", "jpigp_cor:NetSalesUS"]
+    },
+
+    "operating_income": {
+        "jp_gaap": [
+            "jppfs_cor:OperatingIncome",
+            { "elementId": "jppfs_cor:OperatingLoss", "negate": true }
+        ],
+        "ifrs": [
+            "jpigp_cor:OperatingProfitLossIFRS",
+            "jpigp_cor:ProfitLossFromOperatingActivitiesIFRS"
+        ],
+        "us_gaap": ["jpigp_cor:OperatingIncomeLossUS"]
+    },
+
+    "ordinary_income": {
+        "jp_gaap": [
+            "jppfs_cor:OrdinaryIncome",
+            { "elementId": "jppfs_cor:OrdinaryLoss", "negate": true }
+        ],
+        "ifrs": [],
+        "us_gaap": []
+    },
+
+    "profit_before_tax": {
+        "jp_gaap": [
+            "jppfs_cor:IncomeBeforeIncomeTaxes",
+            "jppfs_cor:IncomeBeforeIncomeTaxesAndMinorityInterests"
+        ],
+        "ifrs": ["jpigp_cor:ProfitLossBeforeTaxIFRS"],
+        "us_gaap": ["jpigp_cor:IncomeLossBeforeIncomeTaxesUS"]
+    },
+
+    "profit_loss": {
+        "jp_gaap": [
+            "jppfs_cor:ProfitLossAttributableToOwnersOfParent",
+            "jppfs_cor:NetIncome",
+            "jppfs_cor:ProfitLoss",
+            { "elementId": "jppfs_cor:NetLoss", "negate": true }
+        ],
+        "ifrs": [
+            "jpigp_cor:ProfitLossAttributableToOwnersOfParentIFRS",
+            "jpigp_cor:ProfitLossIFRS"
+        ],
+        "us_gaap": ["jpigp_cor:NetIncomeLossUS"]
+    },
+
+    "total_assets": {
+        "jp_gaap": ["jppfs_cor:Assets", "jppfs_cor:TotalAssets"],
+        "ifrs": ["jpigp_cor:TotalAssetsIFRS", "jpigp_cor:AssetsIFRS"],
+        "us_gaap": ["jpigp_cor:AssetsUS"]
+    },
+
+    "net_assets": {
+        "jp_gaap": ["jppfs_cor:NetAssets", "jppfs_cor:TotalNetAssets"],
+        "ifrs": ["jpigp_cor:TotalEquityIFRS", "jpigp_cor:EquityIFRS"],
+        "us_gaap": ["jpigp_cor:StockholdersEquityUS"]
+    },
+
+    "equity_attributable_to_owners": {
+        "jp_gaap": ["jppfs_cor:ShareholdersEquity", "jppfs_cor:TotalShareholdersEquity"],
+        "ifrs": ["jpigp_cor:EquityAttributableToOwnersOfParentIFRS"],
+        "us_gaap": []
+    },
+
+    "liabilities": {
+        "jp_gaap": ["jppfs_cor:Liabilities", "jppfs_cor:TotalLiabilities"],
+        "ifrs": ["jpigp_cor:TotalLiabilitiesIFRS", "jpigp_cor:LiabilitiesIFRS"],
+        "us_gaap": ["jpigp_cor:LiabilitiesUS"]
+    },
+
+    "cash_and_deposits": {
+        "jp_gaap": ["jppfs_cor:CashAndDeposits", "jppfs_cor:CashAndCashEquivalents"],
+        "ifrs": ["jpigp_cor:CashAndCashEquivalentsIFRS"],
+        "us_gaap": ["jpigp_cor:CashAndCashEquivalentsUS"]
+    },
+
+    "research_and_development_expenses": {
+        "jp_gaap": [
+            "jppfs_cor:ResearchAndDevelopmentExpenses",
+            "jppfs_cor:ResearchAndDevelopmentExpensesSGA"
+        ],
+        "ifrs": ["jpigp_cor:ResearchAndDevelopmentExpensesIFRS"],
+        "us_gaap": []
+    },
+
+    "net_cash_provided_by_operating_activities": {
+        "jp_gaap": ["jppfs_cor:NetCashProvidedByUsedInOperatingActivities"],
+        "ifrs": ["jpigp_cor:NetCashProvidedByUsedInOperatingActivitiesIFRS"],
+        "us_gaap": ["jpigp_cor:NetCashProvidedByUsedInOperatingActivitiesUS"]
+    },
+
+    "capital_expenditure": {
+        "jp_gaap": [
+            {
+                "elementId": "jppfs_cor:PurchaseOfPropertyPlantAndEquipment",
+                "negate": true
+            }
+        ],
+        "ifrs": [
+            {
+                "elementId": "jpigp_cor:PurchaseOfPropertyPlantAndEquipmentIFRS",
+                "negate": true
+            }
+        ],
+        "us_gaap": []
+    },
+
+    "number_of_employees": {
+        "jp_gaap": ["jpcrp_cor:NumberOfEmployees"],
+        "ifrs": ["jpcrp_cor:NumberOfEmployees"],
+        "us_gaap": ["jpcrp_cor:NumberOfEmployees"]
+    },
+
+    "average_annual_salary": {
+        "jp_gaap": [
+            "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees"
+        ],
+        "ifrs": [
+            "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees"
+        ],
+        "us_gaap": [
+            "jpcrp_cor:AverageAnnualSalaryInformationAboutReportingCompanyInformationAboutEmployees"
+        ]
+    }
+}

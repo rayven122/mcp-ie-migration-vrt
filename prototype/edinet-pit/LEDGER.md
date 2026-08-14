@@ -12,7 +12,7 @@
 
 - [x] **M0** CI解放 + 足場
 - [x] **M1** `schema.sql` + `store/db.mjs` + `store/facts.mjs` — バイテンポラルの核
-- [ ] **M2** 正規化2層（mapping / fallback / context / units）
+- [x] **M2** 正規化2層（mapping / fallback / context / units）
 - [ ] **M3** `edinet/client.mjs`（transport注入）+ `edinet/codelist.mjs`
 - [ ] **M4** `query/financials.mjs` — **仮説の証明**（ここまで到達すれば目的達成）
 - [ ] **M5** `mcp/server.mjs`（余力分）
@@ -81,6 +81,35 @@ CIは18/20/22のマトリクスを回す。
 → `run-tests.js` に Node major >= 22 のゲートを追加し、それ未満ではスキップ。
 既存 `test/` 配下の探索挙動は変えていない。
 
+### M2 — 正規化2層
+
+- `normalize/mapping.json`: Layer1。15指標 × 3会計基準の既知要素ID。
+  **リスト順が優先度**（`NetSales` > `OperatingRevenue1`）。
+  `{ elementId, negate: true }` 形式で符号反転を表現（損失系要素は正で報告される）
+- `normalize/fallback.mjs`: Layer2。要素IDのローカル名に対する**狭く固定した**正規表現。
+  複数パターンが該当したら null を返す（恣意的に選ぶより欠損のほうが気づける）
+- `normalize/context.mjs`: 当期/前期/前々期、連結/個別を判定。
+  **Member軸を含むcontextID（セグメント）と Forecast は拒否**。
+  未知のラベルは「当期と仮定」せず拒否する
+- `normalize/units.mjs`: 円/千円/百万円/十億円 → **すべて円に正規化**（精度を落とさない）。
+  株/人/％/件は素通し。未知の単位は例外を投げる
+- `normalize/index.mjs`: 2層を統合。`normalizeFiling()` は facts と **skipped レポート**を返す
+- `test/normalize.test.mjs` を追加し、合計41件緑
+
+**設計の要点**
+
+- **Layer1 は常に Layer2 に勝つ。** 正規表現が本物の要素IDを上書きしたら、
+  正しいデータと見分けがつかなくなる
+- **`mapping_layer` を facts テーブルに追加。** 既知IDによる解決（layer1）か
+  名前形状からの推測（layer2）かを区別できないと、値をどれだけ信用してよいか
+  判断できず、カバレッジ指標も意味を失う
+- **未知の単位・未知の期間ラベルは推測せず拒否する。** 静かに桁を間違えた数値は、
+  欠損よりはるかに悪い
+- `skipped` レポート（context / unmapped / unit）は装飾ではない。
+  タクソノミ年次改訂は「skipped の急増」として現れる。これが無いと毎年静かに
+  取得量が減っていくだけになる
+- **欠損と0を絶対に混同しない。** 空欄・`-`・`－` は null
+
 ---
 
 ## 設計上の決定
@@ -109,7 +138,15 @@ CIは18/20/22のマトリクスを回す。
 
 ## 論点（起床後に判断が必要なもの）
 
-- なし（M0時点）
+- **`capital_expenditure` の符号**: キャッシュフロー計算書の
+  `PurchaseOfPropertyPlantAndEquipment` は支出なので負で報告される。これを
+  `negate: true` で正に反転して「設備投資額」としている。
+  「CF項目は報告どおりの符号を保つ」という方針もありうる。要判断
+- **`PERCENT` を比率に変換していない**（8.5% は 8.5 のまま）。
+  変換したほうが計算は安全だが、見えない変換を増やしたくなかったため素通しにした
+- **層2の畳み込み**: 現在は同一 field に複数の layer2 候補があると
+  priority が同じ（MAX_SAFE_INTEGER）ため先着が残る。実データで衝突頻度を見て
+  決めるべき。層1が存在する限り実害は小さい
 
 ---
 
