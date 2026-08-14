@@ -34,7 +34,7 @@ function periodTypeOf(docTypeCode) {
  * the failure mode here, not an exception.
  */
 export async function ingestDocument(db, client, document, options = {}) {
-    const { docType = DOC_TYPE.CSV } = options;
+    const { docType = DOC_TYPE.CSV, rawStore } = options;
 
     if (document.submittedAt === null) {
         // known_from comes from this. Without it the fact has no position on the
@@ -46,6 +46,22 @@ export async function ingestDocument(db, client, document, options = {}) {
     }
 
     const bytes = await client.fetchDocument(document.docId, docType);
+
+    // Stored before anything is parsed, so a document survives even if the
+    // normalizer throws on it. Fixing the normalizer later must not require
+    // going back to EDINET for bytes we already had.
+    const rawObjectKey = rawStore ? rawStore.put(bytes) : null;
+
+    const result = applyDocument(db, { ...document, rawObjectKey }, bytes, options);
+    return { ...result, rawObjectKey };
+}
+
+/**
+ * Normalizes already-fetched bytes and records them. Shared by ingestion and by
+ * re-normalization, so both paths cannot drift apart in how they interpret a
+ * document.
+ */
+function applyDocument(db, document, bytes, options = {}) {
     const rows = parseDocumentCsv(decodeDocumentBytes(bytes));
     const accountingBasis = options.accountingBasis ?? detectAccountingBasis(rows);
 
@@ -70,6 +86,65 @@ export async function ingestDocument(db, client, document, options = {}) {
 }
 
 /**
+ * Re-derives facts for stored documents straight from the lake.
+ *
+ * This is the reason the lake exists. After a mapping or context-rule change, all
+ * history has to be reprocessed; doing that over the network would mean thousands
+ * of requests against a public service for bytes already on disk. Deliberately
+ * takes no client, so it cannot make a request even by accident.
+ */
+export function renormalize(db, rawStore, options = {}) {
+    const conditions = ['raw_object_key IS NOT NULL'];
+    const params = [];
+
+    if (options.from) {
+        conditions.push('submitted_at >= ?');
+        params.push(options.from);
+    }
+    if (options.to) {
+        conditions.push('submitted_at <= ?');
+        params.push(options.to);
+    }
+    if (options.docIds?.length) {
+        conditions.push(`doc_id IN (${options.docIds.map(() => '?').join(', ')})`);
+        params.push(...options.docIds);
+    }
+
+    const documents = db.all(
+        `SELECT doc_id, edinet_code, doc_type_code, period_start, period_end,
+                fiscal_year, submitted_at, is_amendment, amends_doc_id, raw_object_key
+         FROM documents
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY submitted_at`,
+        ...params
+    );
+
+    const results = [];
+    for (const row of documents) {
+        const document = {
+            docId: row.doc_id,
+            edinetCode: row.edinet_code,
+            docTypeCode: row.doc_type_code,
+            periodStart: row.period_start,
+            periodEnd: row.period_end,
+            fiscalYear: row.fiscal_year,
+            submittedAt: row.submitted_at,
+            isAmendment: row.is_amendment === 1,
+            amendsDocId: row.amends_doc_id,
+            rawObjectKey: row.raw_object_key,
+        };
+
+        try {
+            results.push(applyDocument(db, document, rawStore.get(row.raw_object_key), options));
+        } catch (error) {
+            results.push({ docId: row.doc_id, error: error.message, facts: 0 });
+        }
+    }
+
+    return results;
+}
+
+/**
  * Walks a date range and ingests the periodic financial filings it finds.
  *
  * A generator so a ten-year backfill can be interrupted and resumed, and so a
@@ -77,14 +152,14 @@ export async function ingestDocument(db, client, document, options = {}) {
  * per document and the walk continues.
  */
 export async function* ingestRange(db, client, options) {
-    const { from, to, filter = isFinancialFiling, docType = DOC_TYPE.CSV } = options;
+    const { from, to, filter = isFinancialFiling, docType = DOC_TYPE.CSV, rawStore } = options;
 
     for await (const { date, documents } of client.walkDates(from, to, filter)) {
         const results = [];
 
         for (const document of documents) {
             try {
-                results.push(await ingestDocument(db, client, document, { docType }));
+                results.push(await ingestDocument(db, client, document, { docType, rawStore }));
             } catch (error) {
                 results.push({
                     docId: document.docId,

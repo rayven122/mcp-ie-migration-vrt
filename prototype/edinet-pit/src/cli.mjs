@@ -17,10 +17,11 @@
  */
 
 import { createEdinetClient, isFinancialFiling } from './edinet/client.mjs';
-import { ingestRange, summarizeIngest } from './ingest.mjs';
+import { ingestRange, renormalize, summarizeIngest } from './ingest.mjs';
 import { getFinancials, getRestatements, toDelimited } from './query/financials.mjs';
 import { openDatabase } from './store/db.mjs';
 import { getFactHistory } from './store/facts.mjs';
+import { createRawStore } from './store/raw.mjs';
 
 function parseArgs(argv) {
     const args = { _: [] };
@@ -40,10 +41,11 @@ function usage() {
         [
             'usage:',
             '  backfill --from=YYYY-MM-DD --to=YYYY-MM-DD [--db=path] [--quiet]',
+            '  renormalize [--from=ISO] [--to=ISO] [--db=path] [--lake=path]',
             '  report --company=EDINETCODE [--field=net_sales] [--as-of=YYYY-MM-DD] [--db=path]',
             '  demo',
             '',
-            'backfill needs EDINET_API_KEY.',
+            'backfill needs EDINET_API_KEY. renormalize uses only the lake, never the network.',
         ].join('\n')
     );
 }
@@ -61,12 +63,16 @@ async function backfill(args) {
 
     const db = openDatabase(args.db ?? 'edinet-pit.db');
     const client = createEdinetClient({ subscriptionKey: apiKey });
+    // Keeping the originals is what makes a later normalization fix affordable:
+    // without them, every rule change means re-downloading the same years again.
+    const rawStore = createRawStore({ root: args.lake ?? 'edinet-pit-lake' });
 
     const days = [];
     for await (const day of ingestRange(db, client, {
         from: args.from,
         to: args.to,
         filter: isFinancialFiling,
+        rawStore,
     })) {
         days.push(day);
         if (!args.quiet) {
@@ -86,6 +92,8 @@ async function backfill(args) {
             `unmapped ${summary.skippedRows.unmapped}, unit ${summary.skippedRows.unit}`
     );
     console.log(`requests: ${client.stats.requests} (retries ${client.stats.retries})`);
+    const lake = rawStore.stats();
+    console.log(`lake: ${lake.objects} objects, ${(lake.bytes / 1e6).toFixed(1)} MB`);
 
     // These are the mapping's next entries, ordered by how much they would buy.
     if (summary.topUnmapped.length > 0) {
@@ -93,6 +101,31 @@ async function backfill(args) {
         for (const [elementId, count] of summary.topUnmapped) {
             console.log(`  ${count.toString().padStart(6)}  ${elementId}`);
         }
+    }
+
+    db.close();
+}
+
+/**
+ * Re-derives facts from the lake. Takes no client at all, so a rule change can be
+ * applied to all of history without a single request against a public service.
+ */
+function renormalizeCommand(args) {
+    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const rawStore = createRawStore({ root: args.lake ?? 'edinet-pit-lake' });
+
+    const results = renormalize(db, rawStore, {
+        from: typeof args.from === 'string' ? args.from : undefined,
+        to: typeof args.to === 'string' ? args.to : undefined,
+    });
+
+    const failed = results.filter((result) => result.error);
+    const facts = results.reduce((total, result) => total + (result.facts ?? 0), 0);
+
+    console.log(`documents re-normalized: ${results.length - failed.length}/${results.length}`);
+    console.log(`facts: ${facts}`);
+    for (const result of failed.slice(0, 20)) {
+        console.log(`  failed ${result.docId}: ${result.error}`);
     }
 
     db.close();
@@ -146,6 +179,8 @@ async function main() {
 
     if (command === 'backfill') {
         await backfill(args);
+    } else if (command === 'renormalize') {
+        renormalizeCommand(args);
     } else if (command === 'report') {
         report(args);
     } else if (command === 'demo') {
