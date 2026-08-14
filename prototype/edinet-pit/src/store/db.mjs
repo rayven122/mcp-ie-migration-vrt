@@ -22,6 +22,8 @@ function plain(row) {
 export function openDatabase(path = ':memory:') {
     const db = new DatabaseSync(path);
     db.exec('PRAGMA foreign_keys = ON');
+    // Nesting depth for transaction(); SQLite has no nested BEGIN.
+    let depth = 0;
     db.exec(readFileSync(schemaPath, 'utf8'));
 
     return {
@@ -50,9 +52,25 @@ export function openDatabase(path = ':memory:') {
          * Runs fn inside a transaction. Ingestion has to be all-or-nothing:
          * a half-applied document would leave a fact timeline with a gap, and
          * a gap reads as "this value was never reported" rather than as an error.
+         *
+         * Re-entrant, because the units that need atomicity nest: recording a
+         * document's facts is atomic on its own, and ingesting the document is
+         * atomic across the document row and its facts. SQLite has no nested
+         * BEGIN, so only the outermost call opens and closes one; an inner
+         * failure still propagates and rolls the whole thing back.
          */
         transaction(fn) {
+            if (depth > 0) {
+                depth += 1;
+                try {
+                    return fn();
+                } finally {
+                    depth -= 1;
+                }
+            }
+
             db.exec('BEGIN');
+            depth = 1;
             try {
                 const result = fn();
                 db.exec('COMMIT');
@@ -60,6 +78,8 @@ export function openDatabase(path = ':memory:') {
             } catch (error) {
                 db.exec('ROLLBACK');
                 throw error;
+            } finally {
+                depth = 0;
             }
         },
 
