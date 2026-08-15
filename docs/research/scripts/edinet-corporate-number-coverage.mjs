@@ -19,8 +19,7 @@
  * 出力はすべて標準出力。ネットワークとファイル書き込み以外の副作用はない。
  */
 
-import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 // パーサと検査用数字はプロトタイプ側のモジュールが正。ここで再実装しない。
 import { loadConfig } from '../../../prototype/edinet-pit/src/config.mjs';
 import {
@@ -30,8 +29,6 @@ import {
     summarizeCorporateNumbers,
 } from '../../../prototype/edinet-pit/src/edinet/codelist.mjs';
 
-const CODELIST_URL =
-    'https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip';
 const GBIZ_BASE = 'https://api.info.gbiz.go.jp/hojin/v2/hojin';
 
 function pct(numerator, denominator) {
