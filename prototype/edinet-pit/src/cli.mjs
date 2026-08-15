@@ -16,6 +16,7 @@
  * run in slices rather than as one sweep against a public service.
  */
 
+import { loadConfig, MissingSecretError, requireSecret } from './config.mjs';
 import { createEdinetClient, isFinancialFiling } from './edinet/client.mjs';
 import { parseCodeList, readCodeListFile } from './edinet/codelist.mjs';
 import { getUniverse, loadCompanyMaster, reconcileDelistings } from './edinet/companies.mjs';
@@ -56,21 +57,17 @@ function usage() {
 }
 
 async function backfill(args) {
-    const apiKey = process.env.EDINET_API_KEY;
-    if (!apiKey) {
-        console.error('EDINET_API_KEY is not set. Obtain a key from EDINET first.');
-        process.exit(2);
-    }
     if (!args.from || !args.to) {
         usage();
         process.exit(2);
     }
 
-    const db = openDatabase(args.db ?? 'edinet-pit.db');
-    const client = createEdinetClient({ subscriptionKey: apiKey });
+    const config = loadConfig(args);
+    const db = openDatabase(config.dbPath);
+    const client = createEdinetClient({ subscriptionKey: requireSecret(config, 'edinetApiKey') });
     // Keeping the originals is what makes a later normalization fix affordable:
     // without them, every rule change means re-downloading the same years again.
-    const rawStore = createRawStore({ root: args.lake ?? 'edinet-pit-lake' });
+    const rawStore = createRawStore({ root: config.lakePath });
 
     const days = [];
     for await (const day of ingestRange(db, client, {
@@ -126,7 +123,7 @@ function companiesCommand(args) {
         process.exit(2);
     }
 
-    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const db = openDatabase(loadConfig(args).dbPath);
     const observedAt =
         typeof args['observed-at'] === 'string'
             ? args['observed-at']
@@ -154,7 +151,7 @@ function companiesCommand(args) {
 
 /** The survivorship-free universe, or a point-in-time slice of it. */
 function universeCommand(args) {
-    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const db = openDatabase(loadConfig(args).dbPath);
     const rows = getUniverse(db, {
         listedOnly: args['listed-only'] === true,
         asOf: typeof args['as-of'] === 'string' ? args['as-of'] : undefined,
@@ -181,8 +178,9 @@ function universeCommand(args) {
  * applied to all of history without a single request against a public service.
  */
 function renormalizeCommand(args) {
-    const db = openDatabase(args.db ?? 'edinet-pit.db');
-    const rawStore = createRawStore({ root: args.lake ?? 'edinet-pit-lake' });
+    const config = loadConfig(args);
+    const db = openDatabase(config.dbPath);
+    const rawStore = createRawStore({ root: config.lakePath });
 
     const results = renormalize(db, rawStore, {
         from: typeof args.from === 'string' ? args.from : undefined,
@@ -207,7 +205,7 @@ function report(args) {
         process.exit(2);
     }
 
-    const db = openDatabase(args.db ?? 'edinet-pit.db');
+    const db = openDatabase(loadConfig(args).dbPath);
     const asOf = typeof args['as-of'] === 'string' ? `${args['as-of']}T00:00:00Z` : undefined;
     const fields = typeof args.field === 'string' ? [args.field] : undefined;
 
@@ -267,6 +265,10 @@ async function main() {
 }
 
 main().catch((error) => {
+    if (error instanceof MissingSecretError) {
+        console.error(error.message);
+        process.exit(2);
+    }
     console.error(error);
     process.exit(1);
 });

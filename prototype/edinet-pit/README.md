@@ -67,7 +67,8 @@ UTF-16LEのCSVバイト列から取り込む**通しの経路**でも同じ結�
 ```
 schema.sql              バイテンポラルスキーマ
 src/ingest.mjs          通しの取り込み（一覧→バイト列→パース→正規化→記録）
-src/cli.mjs             backfill / report / demo
+src/cli.mjs             backfill / companies / universe / renormalize / report / demo
+src/config.mjs          環境変数を読む唯一の場所（優先順位: 引数 > env > 既定値）
 src/store/              node:sqlite ラッパ（再入可能トランザクション）、PITクエリ、gBizINFO側
 src/normalize/          2層名寄せ、コンテキスト選別、単位・符号、会計基準判定
 src/edinet/             API v2 クライアント、コードリスト、文書CSV(UTF-16LE)
@@ -76,7 +77,7 @@ src/query/              as_of 付き取得、訂正差分、デモ
 src/mcp/                MCPサーバ（4ツール・バッチ型）
 src/http/               EDINET/gBizINFO共通のペーシングとリトライ
 fixtures/               合成データ
-test/                   148件
+test/                   196件
 ```
 
 ## 実行
@@ -96,16 +97,45 @@ node --test prototype/edinet-pit/test/*.test.mjs
 npm test
 ```
 
+### 環境変数
+
+秘密と運用設定は Infisical のプロジェクト `edinet-pit` に集約している。
+実行時は `infisical run` で注入する（ファイルに秘密が落ちない）。
+
+| 変数 | 性質 | 用途 |
+|---|---|---|
+| `EDINET_API_KEY` | **秘密** | `backfill` |
+| `GBIZ_API_TOKEN` | **秘密** | gBizINFO 照会（任意） |
+| `EDINET_PIT_DB` | 設定 | SQLite のパス |
+| `EDINET_PIT_LAKE` | 設定 | 生データレイクのパス |
+
+**優先順位は CLI引数 > 環境変数 > 既定値**。読むのは `src/config.mjs` の1箇所だけ。
+全変数の一覧と、Infisical に載せていない VRT 側の変数は
+リポジトリ直下の [`.env.example`](../../.env.example) を参照。
+
+初回のみ、`.infisical.json` の `workspaceId` を実プロジェクトのものに置き換える:
+
+```bash
+infisical init          # workspaceId を書き込む
+```
+
 ### 実データを入れる
 
 ```bash
 # まず1日だけで応答形状の想定を確認する
-EDINET_API_KEY=xxxx node prototype/edinet-pit/src/cli.mjs \
-    backfill --from=2024-06-20 --to=2024-06-20 --db=pit.db
+infisical run --env=dev -- node prototype/edinet-pit/src/cli.mjs \
+    backfill --from=2024-06-20 --to=2024-06-20
 
-# 取り込んだ企業を見る
-node prototype/edinet-pit/src/cli.mjs report --db=pit.db --company=E02144 --field=net_sales
+# 取り込んだ企業を見る（秘密は不要）
+node prototype/edinet-pit/src/cli.mjs report --company=E02144 --field=net_sales
+
+# Infisical を使わない場合
+EDINET_API_KEY=xxxx node prototype/edinet-pit/src/cli.mjs \
+    backfill --from=2024-06-20 --to=2024-06-20
 ```
+
+`demo` / `report` / `universe` / `renormalize` は秘密を必要としないので、
+Infisical 無しでそのまま動く。
 
 `backfill` は最後に**未マップ要素の頻出順**を出す。それが次にマッピングへ追加すべき要素。
 

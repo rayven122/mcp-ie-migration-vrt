@@ -22,15 +22,19 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { loadConfig } from '../config.mjs';
 import { KNOWN_FIELDS } from '../normalize/index.mjs';
 import { loadFixtures } from '../query/demo.mjs';
 import { getFinancials, getRestatements, toDelimited } from '../query/financials.mjs';
 import { openDatabase } from '../store/db.mjs';
 import { getFactHistory } from '../store/facts.mjs';
 
-const db = openDatabase(process.env.EDINET_PIT_DB ?? ':memory:');
+// Falling back to an in-memory store keeps the server runnable with nothing
+// configured, which is what makes it demonstrable without a backfill first.
+const { dbPath } = loadConfig({}, process.env, { db: ':memory:' });
+const db = openDatabase(dbPath);
 
-if (!process.env.EDINET_PIT_DB) {
+if (dbPath === ':memory:') {
     // stdio transport: anything on stdout would corrupt the JSON-RPC stream.
     console.error('[edinet-pit] no EDINET_PIT_DB set, seeding an in-memory store from fixtures');
     loadFixtures(db);

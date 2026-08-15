@@ -42,6 +42,14 @@ npm-debug.log*
 .env.local
 .env.*.local
 
+# EDINET PIT prototype artifacts. A backfill writes a SQLite store and a data
+# lake of original documents into the working directory; neither belongs in git.
+edinet-pit.db
+edinet-pit.db-journal
+edinet-pit.db-wal
+edinet-pit.db-shm
+edinet-pit-lake/
+
 # Selenium
 geckodriver.log
 chromedriver.log

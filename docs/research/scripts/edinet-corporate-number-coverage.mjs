@@ -22,6 +22,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 // パーサと検査用数字はプロトタイプ側のモジュールが正。ここで再実装しない。
+import { loadConfig } from '../../../prototype/edinet-pit/src/config.mjs';
 import {
     fetchCodeList,
     parseCodeList,
@@ -53,9 +54,13 @@ function printTypeTable(byType) {
 }
 
 async function sampleGbiz(records, sampleSize) {
-    const token = process.env.GBIZ_API_TOKEN;
+    // 未設定でも落とさない。この照会は任意で、充足率の集計だけなら不要なため。
+    const token = loadConfig().gbizApiToken;
     if (!token) {
-        console.log('\n[skip] GBIZ_API_TOKEN が未設定のため gBizINFO 照会は行いません。');
+        console.log(
+            '\n[skip] GBIZ_API_TOKEN が未設定のため gBizINFO 照会は行いません。' +
+                '\n        infisical run --env=dev -- node <このスクリプト> ... で注入できます。'
+        );
         return;
     }
 
