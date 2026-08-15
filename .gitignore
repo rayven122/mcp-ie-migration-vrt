@@ -38,9 +38,12 @@ npm-debug.log*
 
 # Misc
 .DS_Store
+# Any .env variant holds real values. Ignore them all, then re-admit the example
+# so the documented surface stays in the repository. Without the wildcard a file
+# named .env.prod would be committed.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # EDINET PIT prototype artifacts. A backfill writes a SQLite store and a data
 # lake of original documents into the working directory; neither belongs in git.
