@@ -36,9 +36,9 @@ $checks.Add((New-CheckResult 'edge' ($null -ne $edgePath) $edgeDisplay 'Install 
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 $nodeVersion = if ($node) { (& node --version) -replace '^v', '' } else { $null }
-$nodeSupported = $nodeVersion -and ([version]$nodeVersion -ge [version]'18.0.0')
+$nodeSupported = $nodeVersion -and ([version]$nodeVersion -ge [version]'20.0.0')
 $nodeDisplay = if ($nodeVersion) { $nodeVersion } else { 'not found' }
-$checks.Add((New-CheckResult 'node' $nodeSupported $nodeDisplay 'Install Node.js 18 or newer when running outside the Claude Desktop bundled runtime.'))
+$checks.Add((New-CheckResult 'node' $nodeSupported $nodeDisplay 'Install Node.js 20 or newer when running outside the Claude Desktop bundled runtime.'))
 
 $explorer = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq (Get-Process -Id $PID).SessionId }
 $checks.Add((New-CheckResult 'interactive-session' ($null -ne $explorer) "session $((Get-Process -Id $PID).SessionId)" 'Run from the logged-on, non-elevated interactive Windows session.'))

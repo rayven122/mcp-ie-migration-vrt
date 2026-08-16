@@ -14,6 +14,7 @@ Chromium Edge ─ Selenium screenshot ─┘
 - Microsoft Edge Stable
 - Edge IEモードポリシー（`InternetExplorerIntegrationLevel=1`）
 - IEDriverServer 4.0.0.0以上
+- Node.js 20以上（Claude Desktop同梱ランタイム外で実行する場合）
 - ログオン中の非昇格Windowsセッション
 - Edge/IEズームとWindows表示倍率を100%に固定
 
@@ -73,7 +74,7 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 - `maxDiffPixelRatio`: `0.005`
 - `threshold`: `0.2`
 - ブラウザのタブやアドレスバーは撮影対象外
-- 画像サイズが異なる場合はリサイズせず失敗
+- 画像はリサイズ・トリミングせず、サイズが異なる場合も差分画像を生成してAIレビュー
 
 詳細なチェックポイントと撮影規約は[`docs/vrt-standard.md`](docs/vrt-standard.md)を参照してください。MCPからは`vrt-standard://current`で取得できます。
 
@@ -86,7 +87,7 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 | `accessibility_snapshot` | 画面構造と操作対象を取得 |
 | `execute_script` | DOM・computed style・スクロールを確認 |
 | `diagnostics` | console・JavaScript error・networkログを取得 |
-| `vrt` | 2セッションの現在画面を比較 |
+| `vrt` | 2セッションの現在画面を比較し、既定でbefore・after・diff画像をAIへ返却 |
 | `take_screenshot` | 現在画面を返すか、`outputPath`で指定した場所へ保存 |
 | `close_session` | 指定セッションを終了 |
 
@@ -96,6 +97,7 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 
 - Windows/IIS・ASP.NET 4.8・VB.NET Web Formsで動作確認済みです。
 - VRT成果物は既定で相対パス`artifacts/vrt`へ保存されます。呼び出しごとに`vrt.outputDirectory`で変更できます。
+- `vrt.returnImages`は`all`（既定）、`diff`、`none`から選択できます。寸法不一致はツールエラーではなく`status: "different"`として元画像・差分・診断情報を確認できます。
 - 通常スクリーンショットは既定で画像データを直接返します。保存する場合だけ`take_screenshot.outputPath`を指定します。
 - MCPB署名は公式CLIの既知不具合により保留中です。詳細は[`docs/mcpb-signing.md`](docs/mcpb-signing.md)を参照してください。
 - 開発・ローカルビルドは[`package.json`](package.json)のnpm scriptsを参照してください。

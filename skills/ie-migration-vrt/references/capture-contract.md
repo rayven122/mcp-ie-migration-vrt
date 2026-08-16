@@ -8,7 +8,7 @@ Use the same contract for both sessions:
 - Keep browser zoom at 100% and the Windows display scale fixed for the entire run.
 - Start at scroll position `(0, 0)` unless the checkpoint explicitly requires another position.
 - Use viewport capture by default. Use full-page capture only when both engines can produce the same document extent.
-- Reject images with different pixel dimensions. Never normalize them by resizing.
+- Never normalize different pixel dimensions by resizing or cropping. Return the raw source images and the Playwright diff for AI review.
 - Start with `maxDiffPixelRatio: 0.005` and `threshold: 0.2`. Change these only after reviewing real diff artifacts.
 
-The `vrt` tool enforces viewport position, output dimensions, and the no-resize rule before invoking Playwright Test.
+The `vrt` tool enforces viewport position and the no-resize/no-crop rule before invoking Playwright Test. Pixel-dimension differences return `status: "different"` with source images, a diff image, and capture diagnostics instead of a tool error.

@@ -14,7 +14,7 @@ Use the `mcp-ie-migration-vrt` tools to keep the legacy and migrated pages in se
 3. Operate each session independently until both represent the same business state. Do not assume the locators or navigation steps are identical.
 4. Wait for asynchronous content, fonts, and layout to settle. Avoid comparing loading indicators or transient animations.
 5. Call `vrt` with `beforeSessionId`, `afterSessionId`, a stable checkpoint name, and the agreed viewport.
-6. If the result is `different`, inspect the diff image, then inspect the Chromium page DOM and computed styles. Modify only the migrated implementation.
+6. If the result is `different`, inspect the returned before, after, and diff images together with the capture diagnostics. Distinguish an IE Driver edge, scrollbar, or DPI artifact from an application regression before modifying the migrated implementation.
 7. Reload or navigate the after session back to the checkpoint and call `vrt` again. Repeat until it passes or a genuine intended design difference is identified.
 8. Close both sessions explicitly.
 
@@ -24,11 +24,11 @@ Read [capture-contract.md](references/capture-contract.md) before changing viewp
 
 - Do not submit, save, delete, approve, send, or trigger external actions unless the user explicitly authorizes that mutation.
 - Use stable test data and reproduce the same state in both sessions.
-- Do not resize screenshots to force equal dimensions. Fix the capture state instead.
+- Do not resize or crop screenshots to force equal dimensions. Review raw dimension differences with their source images and diagnostics.
 - Do not update the IE expectation merely to make a failure pass.
 
 ## Failure handling
 
 - If `start_vrt_browsers` fails, confirm Windows, IEDriverServer, Edge IE mode policy, matching Protected Mode zone settings, and that the MCP server runs non-elevated in the logged-on interactive session.
-- If capture dimensions differ, restore the configured viewport and browser zoom before retrying.
+- If capture dimensions differ, first check the requested and measured viewport, document mode, browser zoom, DPI, overflow, and edge-only diff regions. Retry after fixing the environment when possible; otherwise record a confirmed environment-specific difference.
 - If differences are limited to font antialiasing, adjust the threshold only after confirming there is no layout or typography regression.
