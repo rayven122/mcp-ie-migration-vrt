@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -23,6 +23,7 @@ import { Options as EdgeOptions } from 'selenium-webdriver/edge.js';
 import { Options as FirefoxOptions } from 'selenium-webdriver/firefox.js';
 import { Options as IeOptions, ServiceBuilder as IeServiceBuilder } from 'selenium-webdriver/ie.js';
 import { Options as SafariOptions } from 'selenium-webdriver/safari.js';
+import vrtCaptureDiagnosticsScript from './vrt-capture-diagnostics.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json');
@@ -273,6 +274,110 @@ const pngDimensions = (base64) => {
         throw new Error('Screenshot is not a valid PNG');
     }
     return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+};
+
+const captureDiagnosticsSchema = z.object({
+    documentMode: z.number().int().nullable(),
+    viewport: z.object({
+        width: z.number().nullable(),
+        height: z.number().nullable(),
+        innerWidth: z.number().nullable(),
+        innerHeight: z.number().nullable(),
+    }),
+    document: z.object({
+        clientWidth: z.number(),
+        clientHeight: z.number(),
+        scrollWidth: z.number(),
+        scrollHeight: z.number(),
+    }),
+    body: z.object({
+        clientWidth: z.number(),
+        clientHeight: z.number(),
+        scrollWidth: z.number(),
+        scrollHeight: z.number(),
+    }),
+    overflow: z.object({
+        x: z.string(),
+        y: z.string(),
+        vertical: z.boolean(),
+        horizontal: z.boolean(),
+    }),
+    direction: z.string(),
+    scroll: z.object({ x: z.number(), y: z.number() }),
+    display: z.object({
+        deviceXDPI: z.number().nullable(),
+        logicalXDPI: z.number().nullable(),
+        zoomPercent: z.number().nullable(),
+        devicePixelRatio: z.number().nullable(),
+    }),
+});
+
+const captureDiagnostics = async (driver) => driver.executeScript(vrtCaptureDiagnosticsScript);
+
+const startVrtBrowsersOutputSchema = {
+    beforeSessionId: z.string(),
+    afterSessionId: z.string(),
+    status: z.enum(['ready', 'not_ready']),
+    captureContract: z.object({
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        mode: z.literal('viewport'),
+        browserChrome: z.literal(false),
+        scrollX: z.literal(0),
+        scrollY: z.literal(0),
+        allowImageResize: z.literal(false),
+        dimensionMismatch: z.literal('ai-review'),
+        returnImages: z.literal('all'),
+    }),
+    diagnostics: z.object({
+        before: captureDiagnosticsSchema,
+        after: captureDiagnosticsSchema,
+    }),
+    warnings: z.array(z.string()),
+};
+
+const vrtOutputSchema = {
+    status: z.enum(['passed', 'different']),
+    name: z.string(),
+    capture: z.object({
+        requested: z.object({
+            width: z.number().int().positive(),
+            height: z.number().int().positive(),
+        }),
+        before: z.object({
+            width: z.number().int().positive(),
+            height: z.number().int().positive(),
+        }),
+        after: z.object({
+            width: z.number().int().positive(),
+            height: z.number().int().positive(),
+        }),
+        dimensionMismatch: z.boolean(),
+        browserChrome: z.literal(false),
+        resized: z.literal(false),
+    }),
+    diagnostics: z.object({
+        before: captureDiagnosticsSchema,
+        after: captureDiagnosticsSchema,
+    }),
+    comparison: z.object({
+        maxDiffPixelRatio: z.number(),
+        threshold: z.number(),
+    }),
+    review: z.object({
+        required: z.boolean(),
+        reasons: z.array(z.string()),
+        guidance: z.array(z.string()),
+    }),
+    returnedImages: z.array(z.enum(['before', 'after', 'diff'])),
+    artifacts: z.object({
+        runDirectory: z.string(),
+        before: z.string(),
+        after: z.string(),
+        diff: z.string().nullable(),
+        report: z.string(),
+    }),
+    playwrightOutput: z.string(),
 };
 
 const ensureViewport = async (driver, width, height) => {
@@ -1224,7 +1329,21 @@ server.registerTool(
                 .describe(`CSS viewport height; default ${defaultViewport.height}`),
             beforeOptions: browserOptionsSchema,
             afterOptions: browserOptionsSchema,
+            expectedBeforeDocumentMode: z
+                .union([
+                    z.literal(5),
+                    z.literal(7),
+                    z.literal(8),
+                    z.literal(9),
+                    z.literal(10),
+                    z.literal(11),
+                ])
+                .optional()
+                .describe(
+                    'Expected IE document mode; a mismatch is returned as not_ready without closing either session'
+                ),
         },
+        outputSchema: startVrtBrowsersOutputSchema,
     },
     async ({
         beforeUrl,
@@ -1233,6 +1352,7 @@ server.registerTool(
         height = defaultViewport.height,
         beforeOptions,
         afterOptions,
+        expectedBeforeDocumentMode,
     }) => {
         const startedSessions = [];
         try {
@@ -1253,9 +1373,26 @@ server.registerTool(
                 ensureViewport(after.driver, width, height),
             ]);
 
+            const [beforeDiagnostics, afterDiagnostics] = await Promise.all([
+                captureDiagnostics(before.driver),
+                captureDiagnostics(after.driver),
+            ]);
+            const warnings = [...before.warnings, ...after.warnings];
+            let status = 'ready';
+            if (
+                expectedBeforeDocumentMode !== undefined &&
+                beforeDiagnostics.documentMode !== expectedBeforeDocumentMode
+            ) {
+                status = 'not_ready';
+                warnings.push(
+                    `Expected before documentMode ${expectedBeforeDocumentMode}, but detected ${beforeDiagnostics.documentMode ?? 'none'}.`
+                );
+            }
+
             const result = {
                 beforeSessionId: before.sessionId,
                 afterSessionId: after.sessionId,
+                status,
                 captureContract: {
                     width,
                     height,
@@ -1264,10 +1401,16 @@ server.registerTool(
                     scrollX: 0,
                     scrollY: 0,
                     allowImageResize: false,
+                    dimensionMismatch: 'ai-review',
+                    returnImages: 'all',
                 },
-                warnings: [...before.warnings, ...after.warnings],
+                diagnostics: { before: beforeDiagnostics, after: afterDiagnostics },
+                warnings,
             };
-            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            return {
+                content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+                structuredContent: result,
+            };
         } catch (e) {
             await cleanUpSessions(startedSessions);
             return {
@@ -1321,7 +1464,14 @@ server.registerTool(
                 .describe(
                     'Optional directory for this VRT run. Relative paths use the server working directory; defaults to artifacts/vrt.'
                 ),
+            returnImages: z
+                .enum(['all', 'diff', 'none'])
+                .optional()
+                .describe(
+                    'Images returned to the AI; defaults to all (before, after, and diff when generated)'
+                ),
         },
+        outputSchema: vrtOutputSchema,
     },
     async ({
         beforeSessionId,
@@ -1332,6 +1482,7 @@ server.registerTool(
         maxDiffPixelRatio = defaultComparison.maxDiffPixelRatio,
         threshold = defaultComparison.threshold,
         outputDirectory,
+        returnImages = 'all',
     }) => {
         try {
             if (beforeSessionId === afterSessionId) {
@@ -1344,22 +1495,24 @@ server.registerTool(
                 ensureViewport(afterDriver, width, height),
             ]);
 
+            const [beforeDiagnostics, afterDiagnostics] = await Promise.all([
+                captureDiagnostics(beforeDriver),
+                captureDiagnostics(afterDriver),
+            ]);
+
             const [beforePng, afterPng] = await Promise.all([
                 beforeDriver.takeScreenshot(),
                 afterDriver.takeScreenshot(),
             ]);
             const beforeSize = pngDimensions(beforePng);
             const afterSize = pngDimensions(afterPng);
-            if (
+            const dimensionMismatch =
                 beforeSize.width !== afterSize.width ||
                 beforeSize.height !== afterSize.height ||
                 beforeSize.width !== width ||
-                beforeSize.height !== height
-            ) {
-                throw new Error(
-                    `Capture contract mismatch: expected ${width}x${height}, before is ${beforeSize.width}x${beforeSize.height}, after is ${afterSize.width}x${afterSize.height}. Images were not resized.`
-                );
-            }
+                beforeSize.height !== height ||
+                afterSize.width !== width ||
+                afterSize.height !== height;
 
             const artifactRoot = outputDirectory
                 ? resolve(outputDirectory)
@@ -1391,6 +1544,7 @@ server.registerTool(
             );
             let status = 'passed';
             let runnerOutput = '';
+            let runnerError;
             try {
                 const { stdout, stderr } = await execFileAsync(
                     process.execPath,
@@ -1408,10 +1562,10 @@ server.registerTool(
                     }
                 );
                 runnerOutput = `${stdout}\n${stderr}`.trim();
-            } catch (runnerError) {
-                status = 'different';
-                runnerOutput = `${runnerError.stdout || ''}\n${runnerError.stderr || ''}`.trim();
-                if (!runnerOutput) runnerOutput = runnerError.message;
+            } catch (error) {
+                runnerError = error;
+                runnerOutput = `${error.stdout || ''}\n${error.stderr || ''}`.trim();
+                if (!runnerOutput) runnerOutput = error.message;
             }
 
             let diffPath;
@@ -1420,22 +1574,75 @@ server.registerTool(
             } catch (_) {
                 // A passing comparison does not generate a diff image.
             }
+            if (runnerError && !diffPath) {
+                throw new Error(`Playwright VRT runner failed: ${runnerOutput}`);
+            }
+            if (diffPath) status = 'different';
+
+            const reviewReasons = [];
+            if (dimensionMismatch) reviewReasons.push('capture-dimensions-differ');
+            if (status === 'different') reviewReasons.push('pixels-differ');
+            const guidance =
+                status === 'different'
+                    ? [
+                          'Review the diff together with both source images before deciding whether the change is acceptable.',
+                          'A narrow edge-only band can be caused by an IE Driver border or scrollbar; confirm it with the capture diagnostics instead of ignoring all red pixels automatically.',
+                      ]
+                    : [];
+            const returnedImages = [];
             const result = {
                 status,
                 name,
-                capture: { width, height, browserChrome: false, resized: false },
+                capture: {
+                    requested: { width, height },
+                    before: beforeSize,
+                    after: afterSize,
+                    dimensionMismatch,
+                    browserChrome: false,
+                    resized: false,
+                },
+                diagnostics: { before: beforeDiagnostics, after: afterDiagnostics },
                 comparison: { maxDiffPixelRatio, threshold },
+                review: {
+                    required: status === 'different',
+                    reasons: reviewReasons,
+                    guidance,
+                },
+                returnedImages,
                 artifacts: {
                     runDirectory,
                     before: beforePath,
                     after: afterPath,
-                    diff: diffPath,
+                    diff: diffPath ?? null,
                     report: join(runDirectory, 'report.json'),
                 },
                 playwrightOutput: runnerOutput,
             };
+
+            const content = [{ type: 'text', text: JSON.stringify(result, null, 2) }];
+            const appendImage = (label, data, priority) => {
+                returnedImages.push(label);
+                content.push(
+                    { type: 'text', text: `VRT image: ${label}` },
+                    {
+                        type: 'image',
+                        data,
+                        mimeType: 'image/png',
+                        annotations: { audience: ['assistant', 'user'], priority },
+                    }
+                );
+            };
+            if (returnImages === 'all') {
+                appendImage('before', beforePng, 0.8);
+                appendImage('after', afterPng, 0.8);
+            }
+            if ((returnImages === 'all' || returnImages === 'diff') && diffPath) {
+                appendImage('diff', await readFile(diffPath, 'base64'), 1);
+            }
+            content[0].text = JSON.stringify(result, null, 2);
             return {
-                content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+                content,
+                structuredContent: result,
             };
         } catch (e) {
             return {

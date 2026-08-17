@@ -71,7 +71,7 @@ export class McpClient {
 
         // Initialize MCP handshake
         const initResp = await this.#sendRequest('initialize', {
-            protocolVersion: '2024-11-05',
+            protocolVersion: '2025-11-25',
             capabilities: {},
             clientInfo: { name: 'mcp-selenium-tests', version: '1.0.0' },
         });

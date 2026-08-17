@@ -3,9 +3,9 @@
     "manifest_version": "0.3",
     "name": "mcp-ie-migration-vrt",
     "display_name": "IE Migration VRT",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": "Compare Edge IE mode and Chromium Edge screens through paired Selenium sessions and Playwright visual regression testing.",
-    "long_description": "Operate an existing ASP.NET or VB.NET application in Edge IE mode and its migrated Chromium Edge version in independent Selenium sessions, then create same-size screenshots and visual regression evidence.",
+    "long_description": "Operate an existing ASP.NET or VB.NET application in Edge IE mode and its migrated Chromium Edge version in independent Selenium sessions, then return source and diff images with structured diagnostics for AI-assisted visual review.",
     "author": {
         "name": "rayven122",
         "url": "https://github.com/rayven122"
@@ -40,6 +40,6 @@
     "compatibility": {
         "claude_desktop": ">=0.10.0",
         "platforms": ["win32"],
-        "runtimes": { "node": ">=18.0.0" }
+        "runtimes": { "node": ">=20.0.0" }
     }
 }

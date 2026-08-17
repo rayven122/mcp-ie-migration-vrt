@@ -86,6 +86,29 @@ describe('MCP Server', () => {
         }
     });
 
+    it('should expose structured output schemas for VRT tools', async () => {
+        const tools = await client.listTools();
+        for (const name of ['start_vrt_browsers', 'vrt']) {
+            const tool = tools.find((candidate) => candidate.name === name);
+            assert.ok(tool?.outputSchema, `${name} should have an outputSchema`);
+            assert.equal(tool.outputSchema.type, 'object');
+        }
+
+        const startVrtBrowsers = tools.find((tool) => tool.name === 'start_vrt_browsers');
+        assert.deepEqual(
+            startVrtBrowsers.inputSchema.properties.expectedBeforeDocumentMode.enum,
+            [5, 7, 8, 9, 10, 11]
+        );
+        assert.equal(
+            startVrtBrowsers.outputSchema.properties.captureContract.properties.dimensionMismatch
+                .const,
+            'ai-review'
+        );
+
+        const vrt = tools.find((tool) => tool.name === 'vrt');
+        assert.deepEqual(vrt.inputSchema.properties.returnImages.enum, ['all', 'diff', 'none']);
+    });
+
     it('should allow selecting a session on Selenium tools', async () => {
         const tools = await client.listTools();
         const toolsWithoutSessionSelection = ['start_browser', 'start_vrt_browsers', 'vrt'];
@@ -136,5 +159,14 @@ describe('MCP Server', () => {
             expected.length,
             `Expected ${expected.length} resources, got ${uris.length}: ${uris.join(', ')}`
         );
+    });
+
+    it('should expose the AI review capture standard', async () => {
+        const resource = await client.readResource('vrt-standard://current');
+        const standard = JSON.parse(resource.contents[0].text);
+        assert.equal(standard.version, 2);
+        assert.equal(standard.capture.dimensionMismatch, 'ai-review');
+        assert.equal(standard.capture.returnImages, 'all');
+        assert.equal(standard.capture.allowImageResize, false);
     });
 });

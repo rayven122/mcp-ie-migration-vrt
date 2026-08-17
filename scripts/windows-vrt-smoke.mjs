@@ -6,13 +6,26 @@ const outputPath = process.env.VRT_SMOKE_OUTPUT ?? 'C:\\vrt-lab\\smoke-result.js
 const artifactDirectory = process.env.VRT_SMOKE_ARTIFACT_DIR ?? 'C:\\vrt-lab\\artifacts';
 const width = Number(process.env.VRT_SMOKE_WIDTH ?? 1200);
 const height = Number(process.env.VRT_SMOKE_HEIGHT ?? 650);
+const expectedBeforeDocumentMode = process.env.VRT_SMOKE_DOCUMENT_MODE
+    ? Number(process.env.VRT_SMOKE_DOCUMENT_MODE)
+    : undefined;
 const client = new McpClient({}, 300000);
 const report = { startedAt: new Date().toISOString(), baseUrl, steps: [] };
 
 const call = async (name, args) => {
     const result = await client.callTool(name, args);
     const text = getResponseText(result);
-    report.steps.push({ name, args, isError: Boolean(result.isError), text });
+    const images = result.content
+        .filter((entry) => entry.type === 'image')
+        .map((entry) => ({ mimeType: entry.mimeType, base64Length: entry.data.length }));
+    report.steps.push({
+        name,
+        args,
+        isError: Boolean(result.isError),
+        text,
+        structuredContent: result.structuredContent,
+        images,
+    });
     if (result.isError) throw new Error(`${name}: ${text}`);
     return text;
 };
@@ -26,6 +39,7 @@ try {
             width,
             height,
             beforeOptions: { ieIgnoreZoomSetting: true },
+            expectedBeforeDocumentMode,
         })
     );
 
@@ -92,7 +106,7 @@ try {
         by: 'id',
         value: 'IncrementButton',
     });
-    const intentionalDiff = await client.callTool('vrt', {
+    await call('vrt', {
         beforeSessionId: pair.beforeSessionId,
         afterSessionId: pair.afterSessionId,
         name: 'vbnet-intentional-difference',
@@ -101,11 +115,6 @@ try {
         maxDiffPixelRatio: 0,
         threshold: 0.1,
         outputDirectory: artifactDirectory,
-    });
-    report.steps.push({
-        name: 'vrt-intentional-difference',
-        isError: Boolean(intentionalDiff.isError),
-        text: getResponseText(intentionalDiff),
     });
     report.completed = true;
 } catch (error) {

@@ -1,5 +1,5 @@
 {
-    "version": 1,
+    "version": 2,
     "defaultViewport": "windows-rdp",
     "defaultComparison": "ie-migration",
     "viewports": {
@@ -36,6 +36,8 @@
         "scrollX": 0,
         "scrollY": 0,
         "allowImageResize": false,
+        "dimensionMismatch": "ai-review",
+        "returnImages": "all",
         "browserZoomPercent": 100,
         "windowsDisplayScalePercent": 100
     },
