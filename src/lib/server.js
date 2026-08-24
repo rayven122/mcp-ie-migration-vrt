@@ -314,7 +314,7 @@ const captureDiagnosticsSchema = z.object({
 
 const captureDiagnostics = async (driver) => driver.executeScript(vrtCaptureDiagnosticsScript);
 
-const startVrtBrowsersOutputSchema = {
+const startVrtBrowsersResultSchema = z.object({
     beforeSessionId: z.string(),
     afterSessionId: z.string(),
     status: z.enum(['ready', 'not_ready']),
@@ -334,9 +334,9 @@ const startVrtBrowsersOutputSchema = {
         after: captureDiagnosticsSchema,
     }),
     warnings: z.array(z.string()),
-};
+});
 
-const vrtOutputSchema = {
+const vrtResultSchema = z.object({
     status: z.enum(['passed', 'different']),
     name: z.string(),
     capture: z.object({
@@ -378,7 +378,7 @@ const vrtOutputSchema = {
         report: z.string(),
     }),
     playwrightOutput: z.string(),
-};
+});
 
 const ensureViewport = async (driver, width, height) => {
     const readViewport =
@@ -500,6 +500,10 @@ const launchBrowser = async (browser, options = {}) => {
                 options.edgePath ||
                     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
             );
+            // In Edge IE mode, IEDriver can keep waiting for `complete` after
+            // the document is visibly interactive. Subsequent WebDriver calls
+            // still target the rendered DOM, so do not block navigation here.
+            ieOptions.setPageLoadStrategy('none');
             if (process.env.MCP_IE_DRIVER_LOG) {
                 builder.setIeService(
                     new IeServiceBuilder().addArguments(
@@ -1343,7 +1347,6 @@ server.registerTool(
                     'Expected IE document mode; a mismatch is returned as not_ready without closing either session'
                 ),
         },
-        outputSchema: startVrtBrowsersOutputSchema,
     },
     async ({
         beforeUrl,
@@ -1356,16 +1359,13 @@ server.registerTool(
     }) => {
         const startedSessions = [];
         try {
-            const launches = await Promise.allSettled([
-                launchBrowser('edge-ie', beforeOptions),
-                launchBrowser('edge', afterOptions),
-            ]);
-            for (const launch of launches) {
-                if (launch.status === 'fulfilled') startedSessions.push(launch.value);
-            }
-            const failedLaunch = launches.find((launch) => launch.status === 'rejected');
-            if (failedLaunch) throw failedLaunch.reason;
-            const [before, after] = launches.map((launch) => launch.value);
+            // Edge IE mode and Chromium Edge contend for Edge startup resources
+            // when created concurrently on Windows. Start the paired sessions in
+            // a deterministic order while retaining cleanup of either session.
+            const before = await launchBrowser('edge-ie', beforeOptions);
+            startedSessions.push(before);
+            const after = await launchBrowser('edge', afterOptions);
+            startedSessions.push(after);
 
             await Promise.all([before.driver.get(beforeUrl), after.driver.get(afterUrl)]);
             await Promise.all([
@@ -1407,9 +1407,10 @@ server.registerTool(
                 diagnostics: { before: beforeDiagnostics, after: afterDiagnostics },
                 warnings,
             };
+            const structuredContent = startVrtBrowsersResultSchema.parse(result);
             return {
-                content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                structuredContent: result,
+                content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+                structuredContent,
             };
         } catch (e) {
             await cleanUpSessions(startedSessions);
@@ -1471,7 +1472,6 @@ server.registerTool(
                     'Images returned to the AI; defaults to all (before, after, and diff when generated)'
                 ),
         },
-        outputSchema: vrtOutputSchema,
     },
     async ({
         beforeSessionId,
@@ -1639,10 +1639,11 @@ server.registerTool(
             if ((returnImages === 'all' || returnImages === 'diff') && diffPath) {
                 appendImage('diff', await readFile(diffPath, 'base64'), 1);
             }
-            content[0].text = JSON.stringify(result, null, 2);
+            const structuredContent = vrtResultSchema.parse(result);
+            content[0].text = JSON.stringify(structuredContent, null, 2);
             return {
                 content,
-                structuredContent: result,
+                structuredContent,
             };
         } catch (e) {
             return {

@@ -3,7 +3,7 @@
     "manifest_version": "0.3",
     "name": "mcp-ie-migration-vrt",
     "display_name": "IE Migration VRT",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Compare Edge IE mode and Chromium Edge screens through paired Selenium sessions and Playwright visual regression testing.",
     "long_description": "Operate an existing ASP.NET or VB.NET application in Edge IE mode and its migrated Chromium Edge version in independent Selenium sessions, then return source and diff images with structured diagnostics for AI-assisted visual review.",
     "author": {

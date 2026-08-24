@@ -98,6 +98,7 @@ $ie-migration-vrt を使って、移行前と移行後の注文一覧を同じ�
 - Windows/IIS・ASP.NET 4.8・VB.NET Web Formsで動作確認済みです。
 - VRT成果物は既定で相対パス`artifacts/vrt`へ保存されます。呼び出しごとに`vrt.outputDirectory`で変更できます。
 - `vrt.returnImages`は`all`（既定）、`diff`、`none`から選択できます。寸法不一致はツールエラーではなく`status: "different"`として元画像・差分・診断情報を確認できます。
+- VRTツールはクライアント互換性のため`outputSchema`を広告せず、構造化結果は`structuredContent`とテキストJSONの両方で返します。
 - 通常スクリーンショットは既定で画像データを直接返します。保存する場合だけ`take_screenshot.outputPath`を指定します。
 - MCPB署名は公式CLIの既知不具合により保留中です。詳細は[`docs/mcpb-signing.md`](docs/mcpb-signing.md)を参照してください。
 - 開発・ローカルビルドは[`package.json`](package.json)のnpm scriptsを参照してください。
