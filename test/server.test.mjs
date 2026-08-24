@@ -86,12 +86,14 @@ describe('MCP Server', () => {
         }
     });
 
-    it('should expose structured output schemas for VRT tools', async () => {
+    it('should omit output schemas from every tool for client compatibility', async () => {
         const tools = await client.listTools();
-        for (const name of ['start_vrt_browsers', 'vrt']) {
-            const tool = tools.find((candidate) => candidate.name === name);
-            assert.ok(tool?.outputSchema, `${name} should have an outputSchema`);
-            assert.equal(tool.outputSchema.type, 'object');
+        for (const tool of tools) {
+            assert.equal(
+                tool.outputSchema,
+                undefined,
+                `${tool.name} should not advertise an outputSchema`
+            );
         }
 
         const startVrtBrowsers = tools.find((tool) => tool.name === 'start_vrt_browsers');
@@ -99,12 +101,6 @@ describe('MCP Server', () => {
             startVrtBrowsers.inputSchema.properties.expectedBeforeDocumentMode.enum,
             [5, 7, 8, 9, 10, 11]
         );
-        assert.equal(
-            startVrtBrowsers.outputSchema.properties.captureContract.properties.dimensionMismatch
-                .const,
-            'ai-review'
-        );
-
         const vrt = tools.find((tool) => tool.name === 'vrt');
         assert.deepEqual(vrt.inputSchema.properties.returnImages.enum, ['all', 'diff', 'none']);
     });
