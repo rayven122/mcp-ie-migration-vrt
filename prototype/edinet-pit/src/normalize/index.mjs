@@ -1,0 +1,194 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { selectContext } from './context.mjs';
+import { resolveByPattern } from './fallback.mjs';
+import { normalizeUnit, UnrecognizedUnitError } from './units.mjs';
+
+/**
+ * Separator for composite in-memory map keys.
+ *
+ * NUL cannot appear in an EDINET code, a field name or a year, so it cannot
+ * collide the way a space or a comma could. It is written as an escape rather
+ * than as a literal byte on purpose: a raw NUL in the source makes git treat the
+ * whole file as binary, and a binary file cannot be reviewed in a diff.
+ */
+const KEY_SEPARATOR = '\u0000';
+
+const mappingPath = join(dirname(fileURLToPath(import.meta.url)), 'mapping.json');
+const MAPPING = JSON.parse(readFileSync(mappingPath, 'utf8'));
+
+/**
+ * Flattens the mapping into elementId -> { fieldKey, priority, negate } per basis.
+ *
+ * Priority is the element's position in its list, so when a filing reports both a
+ * preferred and a generic element for one field the preferred one wins regardless
+ * of the order rows happen to appear in.
+ */
+function buildIndex() {
+    const index = new Map();
+
+    for (const [fieldKey, perBasis] of Object.entries(MAPPING)) {
+        if (fieldKey.startsWith('_')) {
+            continue;
+        }
+        for (const [basis, entries] of Object.entries(perBasis)) {
+            entries.forEach((entry, priority) => {
+                const elementId = typeof entry === 'string' ? entry : entry.elementId;
+                const negate = typeof entry === 'string' ? false : entry.negate === true;
+                index.set(`${basis}${KEY_SEPARATOR}${elementId}`, { fieldKey, priority, negate });
+            });
+        }
+    }
+
+    return index;
+}
+
+const ELEMENT_INDEX = buildIndex();
+
+export const KNOWN_FIELDS = Object.keys(MAPPING).filter((key) => !key.startsWith('_'));
+
+function lookupLayer1(basis, elementId) {
+    return ELEMENT_INDEX.get(`${basis}${KEY_SEPARATOR}${elementId}`);
+}
+
+/**
+ * Infers the accounting basis from the element namespaces present.
+ *
+ * Nothing in the filing states it in a field we can read, but the taxonomy the
+ * filer used gives it away: IFRS adopters report through jpigp_cor. Detecting it
+ * matters because the basis selects which mapping list applies, and applying the
+ * JP GAAP list to an IFRS filing resolves almost nothing.
+ *
+ * Counts rather than first-match: an IFRS filing still carries some jppfs_cor
+ * elements, so whichever namespace dominates the financial statements wins.
+ */
+export function detectAccountingBasis(rows, fallback = 'jp_gaap') {
+    const counts = { jp_gaap: 0, ifrs: 0, us_gaap: 0 };
+
+    for (const row of rows) {
+        const id = String(row.elementId ?? '');
+        if (id.startsWith('jpigp_cor:')) {
+            counts[/US$/.test(id) ? 'us_gaap' : 'ifrs'] += 1;
+        } else if (id.startsWith('jppfs_cor:')) {
+            counts.jp_gaap += 1;
+        } else if (/IFRS$/.test(id)) {
+            // A company extension named ...IFRS is still an IFRS filing.
+            counts.ifrs += 1;
+        }
+    }
+
+    const [basis, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    return count === 0 ? fallback : basis;
+}
+
+/**
+ * Turns the rows of one filing into normalized facts.
+ *
+ * Input rows mirror EDINET's CSV export (type=5):
+ *   { elementId, contextId, relativeYear, consolidatedLabel, periodLabel,
+ *     unitLabel, value }
+ *
+ * Returns the facts plus a report of everything skipped. The report is not
+ * decoration: a taxonomy revision shows up as a jump in skipped rows, and
+ * without it the pipeline would just quietly return less data every year.
+ */
+export function normalizeFiling(rows, options) {
+    const { fiscalYear, accountingBasis, allowFallback = true, includePriorYears = true } = options;
+
+    // One winner per (year, consolidation, field): the candidate with the best
+    // layer, then the best priority within layer 1.
+    const best = new Map();
+    const skipped = { context: 0, unmapped: [], unit: [] };
+
+    for (const row of rows) {
+        const context = selectContext(row, { includePriorYears });
+        if (context === null) {
+            skipped.context += 1;
+            continue;
+        }
+
+        const mapped = lookupLayer1(accountingBasis, row.elementId);
+        let fieldKey = mapped?.fieldKey;
+        let priority = mapped?.priority ?? 0;
+        let negate = mapped?.negate ?? false;
+        let mappingLayer = 'layer1';
+
+        if (fieldKey === undefined) {
+            if (!allowFallback) {
+                skipped.unmapped.push(row.elementId);
+                continue;
+            }
+            const guessed = resolveByPattern(row.elementId);
+            if (guessed === null) {
+                skipped.unmapped.push(row.elementId);
+                continue;
+            }
+            fieldKey = guessed;
+            priority = Number.MAX_SAFE_INTEGER;
+            negate = false;
+            mappingLayer = 'layer2';
+        }
+
+        let normalized;
+        try {
+            normalized = normalizeUnit(row.value, row.unitLabel, { negate });
+        } catch (error) {
+            if (error instanceof UnrecognizedUnitError) {
+                skipped.unit.push({ elementId: row.elementId, unitLabel: row.unitLabel });
+                continue;
+            }
+            throw error;
+        }
+
+        const candidate = {
+            companyId: options.companyId,
+            fiscalYear: fiscalYear + context.yearOffset,
+            periodType: options.periodType ?? 'annual',
+            consolidated: context.consolidated,
+            fieldKey,
+            value: normalized.value,
+            unit: normalized.unit,
+            accountingBasis,
+            sourceElementId: row.elementId,
+            mappingLayer,
+        };
+
+        const key = [candidate.fiscalYear, candidate.consolidated ? 1 : 0, fieldKey].join(
+            KEY_SEPARATOR
+        );
+        const incumbent = best.get(key);
+
+        if (incumbent === undefined || outranks({ mappingLayer, priority }, incumbent)) {
+            best.set(key, { ...candidate, priority });
+        }
+    }
+
+    const facts = [...best.values()].map(({ priority: _priority, ...fact }) => fact);
+    return { facts, skipped };
+}
+
+/** A layer 1 match always beats a layer 2 guess; within layer 1, lower priority wins. */
+function outranks(candidate, incumbent) {
+    if (candidate.mappingLayer !== incumbent.mappingLayer) {
+        return candidate.mappingLayer === 'layer1';
+    }
+    return candidate.priority < incumbent.priority;
+}
+
+/**
+ * Share of requested fields that resolved, split by layer. This is the number to
+ * watch after an annual taxonomy revision.
+ */
+export function coverageOf(facts, fields = KNOWN_FIELDS) {
+    const resolved = new Set(facts.map((fact) => fact.fieldKey));
+    const byLayer = { layer1: 0, layer2: 0 };
+    for (const fact of facts) {
+        byLayer[fact.mappingLayer] += 1;
+    }
+    return {
+        requested: fields.length,
+        resolved: fields.filter((field) => resolved.has(field)).length,
+        byLayer,
+    };
+}

@@ -1,0 +1,164 @@
+{
+    "_comment": [
+        "Synthetic filings for a company that restates FY2023 in a later amendment.",
+        "Rows carry the columns of EDINET's CSV export (type=5), already parsed into",
+        "objects -- the CSV reader that produces this shape from the real file is",
+        "covered separately. Figures are invented; the shapes are what matters.",
+        "",
+        "Timeline:",
+        "  2024-06-20  annual report for FY2023        net_sales 45,000 million",
+        "  2024-11-05  amendment restating FY2023      net_sales 44,100 million",
+        "              (operating_income re-reported unchanged, total_assets restated)",
+        "  2025-06-24  annual report for FY2024        FY2024 plus FY2023 comparatives"
+    ],
+
+    "filings": [
+        {
+            "doc": {
+                "docId": "S100ORIG",
+                "edinetCode": "E99999",
+                "docTypeCode": "120",
+                "fiscalYear": 2023,
+                "periodStart": "2023-04-01",
+                "periodEnd": "2024-03-31",
+                "submittedAt": "2024-06-20T00:00:00Z",
+                "isAmendment": false
+            },
+            "accountingBasis": "jp_gaap",
+            "rows": [
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "45000"
+                },
+                {
+                    "elementId": "jppfs_cor:OperatingIncome",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "5300"
+                },
+                {
+                    "elementId": "jppfs_cor:Assets",
+                    "contextId": "CurrentYearInstant",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "時点",
+                    "unitLabel": "百万円",
+                    "value": "80000"
+                },
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "CurrentYearDuration_AutoMember",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "31000"
+                },
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "CurrentYearDuration_NonConsolidatedMember",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "個別",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "12000"
+                }
+            ]
+        },
+
+        {
+            "doc": {
+                "docId": "S100AMND",
+                "edinetCode": "E99999",
+                "docTypeCode": "130",
+                "fiscalYear": 2023,
+                "periodStart": "2023-04-01",
+                "periodEnd": "2024-03-31",
+                "submittedAt": "2024-11-05T00:00:00Z",
+                "isAmendment": true,
+                "amendsDocId": "S100ORIG"
+            },
+            "accountingBasis": "jp_gaap",
+            "rows": [
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "44100"
+                },
+                {
+                    "elementId": "jppfs_cor:OperatingIncome",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "5300"
+                },
+                {
+                    "elementId": "jppfs_cor:Assets",
+                    "contextId": "CurrentYearInstant",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "時点",
+                    "unitLabel": "百万円",
+                    "value": "79200"
+                }
+            ]
+        },
+
+        {
+            "doc": {
+                "docId": "S100NEXT",
+                "edinetCode": "E99999",
+                "docTypeCode": "120",
+                "fiscalYear": 2024,
+                "periodStart": "2024-04-01",
+                "periodEnd": "2025-03-31",
+                "submittedAt": "2025-06-24T00:00:00Z",
+                "isAmendment": false
+            },
+            "accountingBasis": "jp_gaap",
+            "rows": [
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "48200"
+                },
+                {
+                    "elementId": "jppfs_cor:NetSales",
+                    "contextId": "Prior1YearDuration",
+                    "relativeYear": "前期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "44100"
+                },
+                {
+                    "elementId": "jppfs_cor:OperatingIncome",
+                    "contextId": "CurrentYearDuration",
+                    "relativeYear": "当期",
+                    "consolidatedLabel": "連結",
+                    "periodLabel": "期間",
+                    "unitLabel": "百万円",
+                    "value": "6100"
+                }
+            ]
+        }
+    ]
+}

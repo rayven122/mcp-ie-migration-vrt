@@ -20,16 +20,26 @@ export class McpClient {
     #env;
     #requestTimeoutMs;
 
-    constructor(env = {}, requestTimeoutMs = 60000) {
+    #serverPath;
+
+    /**
+     * @param {object} env                 Extra environment for the server process.
+     * @param {number} requestTimeoutMs
+     * @param {string} [serverPath]        Server to spawn; defaults to this package's.
+     *                                     Prototypes point it at their own server rather
+     *                                     than duplicating this client.
+     */
+    constructor(env = {}, requestTimeoutMs = 60000, serverPath = SERVER_PATH) {
         this.#env = env;
         this.#requestTimeoutMs = requestTimeoutMs;
+        this.#serverPath = serverPath;
     }
 
     /**
      * Start the MCP server and initialize the connection.
      */
     async start() {
-        this.#process = spawn('node', [SERVER_PATH], {
+        this.#process = spawn('node', [this.#serverPath], {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: { ...process.env, ...this.#env },
         });

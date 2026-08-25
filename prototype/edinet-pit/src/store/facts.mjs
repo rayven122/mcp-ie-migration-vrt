@@ -1,0 +1,260 @@
+/**
+ * Fact ingestion and point-in-time reads.
+ *
+ * The one invariant everything else rests on: a fact row is never overwritten.
+ * Ingesting a correction appends a row and closes the previous one, so the rows
+ * for a single (company, year, period, consolidated, field) form a timeline of
+ * what was knowable when.
+ *
+ * Ingestion is written to be order-independent and idempotent, because backfill
+ * does not arrive in filing order -- a 2015 document can land after a 2024 one,
+ * and a re-run must not change the result. Rather than trying to place each
+ * incoming row relative to its neighbours, we insert it with only known_from set
+ * and then reseal the whole series. Resealing is a pure function of the rows
+ * present, so any arrival order converges on the same timeline.
+ */
+
+/**
+ * Separator for composite in-memory map keys.
+ *
+ * NUL cannot appear in an EDINET code, a field name or a year, so it cannot
+ * collide the way a space or a comma could. It is written as an escape rather
+ * than as a literal byte on purpose: a raw NUL in the source makes git treat the
+ * whole file as binary, and a binary file cannot be reviewed in a diff.
+ */
+const KEY_SEPARATOR = '\u0000';
+
+const SERIES_COLUMNS = ['company_id', 'fiscal_year', 'period_type', 'consolidated', 'field_key'];
+
+function seriesKeyOf(fact) {
+    return {
+        company_id: fact.companyId,
+        fiscal_year: fact.fiscalYear,
+        period_type: fact.periodType,
+        consolidated: fact.consolidated ? 1 : 0,
+        field_key: fact.fieldKey,
+    };
+}
+
+function seriesId(key) {
+    return SERIES_COLUMNS.map((column) => key[column]).join(KEY_SEPARATOR);
+}
+
+export function recordDocument(db, doc) {
+    db.run(
+        `INSERT INTO documents (
+            doc_id, edinet_code, doc_type_code, period_start, period_end,
+            fiscal_year, submitted_at, is_amendment, amends_doc_id, raw_object_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (doc_id) DO UPDATE SET
+            edinet_code = excluded.edinet_code,
+            doc_type_code = excluded.doc_type_code,
+            period_start = excluded.period_start,
+            period_end = excluded.period_end,
+            fiscal_year = excluded.fiscal_year,
+            submitted_at = excluded.submitted_at,
+            is_amendment = excluded.is_amendment,
+            amends_doc_id = excluded.amends_doc_id,
+            raw_object_key = excluded.raw_object_key`,
+        doc.docId,
+        doc.edinetCode,
+        doc.docTypeCode,
+        doc.periodStart ?? null,
+        doc.periodEnd ?? null,
+        doc.fiscalYear ?? null,
+        doc.submittedAt,
+        doc.isAmendment ? 1 : 0,
+        doc.amendsDocId ?? null,
+        doc.rawObjectKey ?? null
+    );
+}
+
+/**
+ * Rebuilds known_until across one series and drops redundant rows.
+ *
+ * A correction usually restates only a few figures while re-reporting the rest
+ * unchanged. Keeping those unchanged repeats would invent restatement events
+ * that never happened, so consecutive rows carrying the same value, unit and
+ * accounting basis collapse to the earliest one -- which is also the answer to
+ * "when did this first become knowable".
+ */
+function resealSeries(db, key) {
+    const where = SERIES_COLUMNS.map((column) => `${column} = ?`).join(' AND ');
+    const params = SERIES_COLUMNS.map((column) => key[column]);
+
+    const rows = db.all(
+        `SELECT known_from, value, unit, accounting_basis
+         FROM facts WHERE ${where} ORDER BY known_from`,
+        ...params
+    );
+
+    const kept = [];
+    for (const row of rows) {
+        const previous = kept[kept.length - 1];
+        const unchanged =
+            previous !== undefined &&
+            previous.value === row.value &&
+            previous.unit === row.unit &&
+            previous.accounting_basis === row.accounting_basis;
+
+        if (unchanged) {
+            db.run(
+                `DELETE FROM facts WHERE ${where} AND known_from = ?`,
+                ...params,
+                row.known_from
+            );
+        } else {
+            kept.push(row);
+        }
+    }
+
+    kept.forEach((row, index) => {
+        const next = kept[index + 1];
+        db.run(
+            `UPDATE facts SET known_until = ? WHERE ${where} AND known_from = ?`,
+            next ? next.known_from : null,
+            ...params,
+            row.known_from
+        );
+    });
+}
+
+/**
+ * Records the facts extracted from one document.
+ *
+ * `doc.submittedAt` becomes known_from: the moment the value became knowable.
+ * Callers pass normalized facts -- unit and sign handling belongs upstream in
+ * the normalizer, so that everything reaching the store is already comparable.
+ */
+export function recordFacts(db, doc, facts) {
+    return db.transaction(() => {
+        const affected = new Map();
+
+        for (const fact of facts) {
+            const key = seriesKeyOf(fact);
+            affected.set(seriesId(key), key);
+
+            db.run(
+                `INSERT INTO facts (
+                    company_id, fiscal_year, period_type, consolidated, field_key,
+                    value, unit, accounting_basis,
+                    source_doc_id, source_element_id, mapping_layer,
+                    known_from, known_until, is_amendment
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                ON CONFLICT (
+                    company_id, fiscal_year, period_type, consolidated, field_key, known_from
+                ) DO UPDATE SET
+                    value = excluded.value,
+                    unit = excluded.unit,
+                    accounting_basis = excluded.accounting_basis,
+                    source_doc_id = excluded.source_doc_id,
+                    source_element_id = excluded.source_element_id,
+                    mapping_layer = excluded.mapping_layer,
+                    is_amendment = excluded.is_amendment`,
+                key.company_id,
+                key.fiscal_year,
+                key.period_type,
+                key.consolidated,
+                key.field_key,
+                fact.value ?? null,
+                fact.unit,
+                fact.accountingBasis,
+                doc.docId,
+                fact.sourceElementId,
+                fact.mappingLayer ?? 'layer1',
+                doc.submittedAt,
+                doc.isAmendment ? 1 : 0
+            );
+        }
+
+        for (const key of affected.values()) {
+            resealSeries(db, key);
+        }
+
+        return affected.size;
+    });
+}
+
+function inClause(column, values) {
+    return `${column} IN (${values.map(() => '?').join(', ')})`;
+}
+
+/**
+ * Reads facts as they were knowable at `asOf`.
+ *
+ * Omitting `asOf` returns the current view (the open row of each series), which
+ * is what a conventional financial API would serve. Passing a timestamp is the
+ * whole point of this prototype: it answers with the value a reader would have
+ * seen then, not the value we know now.
+ */
+export function getFactsAsOf(db, options) {
+    const {
+        companyIds,
+        fields,
+        fiscalYears,
+        asOf,
+        periodType = 'annual',
+        consolidated = true,
+    } = options;
+
+    const conditions = ['period_type = ?', 'consolidated = ?'];
+    const params = [periodType, consolidated ? 1 : 0];
+
+    if (companyIds?.length) {
+        conditions.push(inClause('company_id', companyIds));
+        params.push(...companyIds);
+    }
+    if (fields?.length) {
+        conditions.push(inClause('field_key', fields));
+        params.push(...fields);
+    }
+    if (fiscalYears?.length) {
+        conditions.push(inClause('fiscal_year', fiscalYears));
+        params.push(...fiscalYears);
+    }
+
+    if (asOf) {
+        // Half-open interval [known_from, known_until): at the exact instant a
+        // correction was filed, the corrected value is already what you would see.
+        conditions.push('known_from <= ?', '(known_until IS NULL OR known_until > ?)');
+        params.push(asOf, asOf);
+    } else {
+        conditions.push('known_until IS NULL');
+    }
+
+    return db.all(
+        `SELECT company_id, fiscal_year, period_type, consolidated, field_key,
+                value, unit, accounting_basis,
+                source_doc_id, source_element_id, mapping_layer,
+                known_from, known_until, is_amendment
+         FROM facts
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY company_id, fiscal_year, field_key`,
+        ...params
+    );
+}
+
+/**
+ * Returns the full knowledge timeline of one series, oldest first.
+ *
+ * More than one row means the figure was restated. The transition between
+ * consecutive rows is the restatement event: when it happened, and from what
+ * to what.
+ */
+export function getFactHistory(db, options) {
+    const { companyId, fiscalYear, fieldKey, periodType = 'annual', consolidated = true } = options;
+
+    return db.all(
+        `SELECT value, unit, accounting_basis, source_doc_id, source_element_id,
+                mapping_layer, known_from, known_until, is_amendment
+         FROM facts
+         WHERE company_id = ? AND fiscal_year = ? AND field_key = ?
+           AND period_type = ? AND consolidated = ?
+         ORDER BY known_from`,
+        companyId,
+        fiscalYear,
+        fieldKey,
+        periodType,
+        consolidated ? 1 : 0
+    );
+}

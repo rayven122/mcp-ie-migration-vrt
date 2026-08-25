@@ -1,0 +1,5 @@
+{
+    "workspaceId": "REPLACE_WITH_EDINET_PIT_WORKSPACE_ID",
+    "defaultEnvironment": "dev",
+    "gitBranchToEnvironmentMapping": null
+}
